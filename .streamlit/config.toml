@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#FF4500"       # Aerospace Orange (Buttons, Focus)
+backgroundColor = "#F2F2F0"    # Creamish Gray (Main Background)
+secondaryBackgroundColor = "#E6E6E1" # Slightly Darker Cream (Sidebar/Inputs)
+textColor = "#1B4D3E"          # Forest Green (Text)
+font = "sans serif"
