@@ -687,6 +687,13 @@ if st.session_state.step == 0:
                 st.rerun()
         st.caption("*Limited features without an account. Results won't be saved.*")
 
+        st.divider()
+        st.caption(
+            "By using FITFXR you agree that anonymized profile data (size, activity, gear preferences) "
+            "may be used to improve recommendations and shared with gear brand partners in aggregate. "
+            "No personal identifiers are sold. See our Privacy Policy for details."
+        )
+
 # ==========================================
 # STEP 1: BIOMETRICS
 # ==========================================
@@ -1080,6 +1087,22 @@ elif st.session_state.step == 5:
                     results[act] = {"query": query, "products": [], "error": str(e)}
 
         st.session_state.ai_results = results
+
+        # ── Persist session to database ────────────────────────────────────────
+        try:
+            from db import save_session
+            results_to_save = {
+                act: {**res, "answers": collect_activity_answers(act)}
+                for act, res in results.items()
+            }
+            save_session(
+                user_data=st.session_state.user_data,
+                ai_results=results_to_save,
+                username=st.session_state.get("username", "Guest"),
+                is_guest=not st.session_state.get("logged_in", False),
+            )
+        except Exception:
+            pass  # Never block the user if DB is unavailable
 
     # ── Render results ────────────────────────────────────────────────────────
     st.balloons()

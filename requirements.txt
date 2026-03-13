@@ -2,3 +2,5 @@ streamlit
 openai
 python-dotenv
 google-search-results
+supabase
+bcrypt
