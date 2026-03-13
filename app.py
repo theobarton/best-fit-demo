@@ -918,12 +918,14 @@ elif st.session_state.step == 5:
                 st.error(f"AI Error: {e}")
                 st.stop()
 
+        # Build a case-insensitive lookup for AI queries in case keys don't match exactly
+        queries_lower = {k.lower(): v for k, v in queries.items()}
+
         results = {}
         with st.spinner("Searching live stores for each activity..."):
             for act in primary_activities:
-                query = queries.get(act, "")
-                if not query:
-                    continue
+                # Try exact match first, then case-insensitive, then fallback generic query
+                query = queries.get(act) or queries_lower.get(act.lower()) or f"{act} shoes"
                 try:
                     search = GoogleSearch({
                         "engine": "google_shopping",
@@ -935,6 +937,23 @@ elif st.session_state.step == 5:
                     })
                     data = search.get_dict()
                     products = data.get("shopping_results", [])[:10]
+
+                    # If specific query returned nothing, retry with a simpler fallback
+                    if not products:
+                        fallback_query = f"{act} shoes"
+                        search2 = GoogleSearch({
+                            "engine": "google_shopping",
+                            "q": fallback_query,
+                            "api_key": serpapi_key,
+                            "num": 10,
+                            "gl": "us",
+                            "hl": "en",
+                        })
+                        data2 = search2.get_dict()
+                        products = data2.get("shopping_results", [])[:10]
+                        if products:
+                            query = fallback_query
+
                     results[act] = {"query": query, "products": products}
                 except Exception as e:
                     results[act] = {"query": query, "products": [], "error": str(e)}
@@ -977,7 +996,7 @@ elif st.session_state.step == 5:
 
                 products = data.get("products", [])
                 if not products:
-                    st.warning("No results found. Try refining your search.")
+                    st.info(f"No live store results found for **{act}** right now. Try the Refine button below to search again.")
                     continue
 
                 for i in range(0, len(products), 2):
