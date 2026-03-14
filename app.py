@@ -8,14 +8,14 @@ from serpapi import GoogleSearch
 load_dotenv()
 
 def get_secret(key):
-    """Read from Streamlit secrets (cloud) or .env (local)."""
+    """Read from Streamlit secrets (cloud) or .env (local), always at call time."""
     try:
-        return st.secrets[key]
+        val = st.secrets.get(key)
+        if val:
+            return val
     except Exception:
-        return os.getenv(key)
-
-api_key = get_secret("OPENAI_API_KEY")
-serpapi_key = get_secret("SERPAPI_KEY")
+        pass
+    return os.getenv(key, "")
 
 st.set_page_config(page_title="FITFXR", page_icon="👟", layout="wide")
 
@@ -953,12 +953,15 @@ elif st.session_state.step == 5:
     if st.session_state.ai_results is None:
         u = st.session_state.user_data
 
-        # Validate API keys before doing anything
+        # Always read keys fresh at runtime so Streamlit secrets are guaranteed loaded
+        api_key = get_secret("OPENAI_API_KEY")
+        serpapi_key = get_secret("SERPAPI_KEY")
+
         if not api_key:
-            st.error("❌ OpenAI API key is missing. Add OPENAI_API_KEY to your Streamlit secrets.")
+            st.error("❌ OpenAI API key missing. Add OPENAI_API_KEY to Streamlit secrets.")
             st.stop()
         if not serpapi_key:
-            st.error("❌ SerpAPI key is missing. Add SERPAPI_KEY to your Streamlit secrets.")
+            st.error("❌ SerpAPI key missing. Add SERPAPI_KEY to Streamlit secrets.")
             st.stop()
 
         # Injury-aware constraint notes
