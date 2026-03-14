@@ -3,9 +3,17 @@ import json
 from supabase import create_client, Client
 
 
+def _get_secret(key):
+    try:
+        import streamlit as st
+        return st.secrets[key]
+    except Exception:
+        return os.environ.get(key, "")
+
+
 def get_client() -> Client:
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_KEY"]
+    url = _get_secret("SUPABASE_URL")
+    key = _get_secret("SUPABASE_KEY")
     return create_client(url, key)
 
 

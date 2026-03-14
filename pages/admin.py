@@ -13,7 +13,7 @@ if not st.session_state.admin_authed:
     st.title("FITFXR Admin")
     pw = st.text_input("Password", type="password")
     if st.button("Login"):
-        stored_hash = os.environ.get("ADMIN_PASSWORD_HASH", "").encode()
+        stored_hash = (st.secrets.get("ADMIN_PASSWORD_HASH") or os.environ.get("ADMIN_PASSWORD_HASH", "")).encode()
         if stored_hash and bcrypt.checkpw(pw.encode(), stored_hash):
             st.session_state.admin_authed = True
             st.rerun()
@@ -24,7 +24,7 @@ if not st.session_state.admin_authed:
 # ── Load data ──────────────────────────────────────────────────────────────────
 try:
     from supabase import create_client
-    sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+    sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 except Exception as e:
     st.error(f"Database connection failed: {e}")
     st.stop()

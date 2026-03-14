@@ -6,8 +6,16 @@ from openai import OpenAI
 from serpapi import GoogleSearch
 
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-serpapi_key = os.getenv("SERPAPI_KEY")
+
+def get_secret(key):
+    """Read from Streamlit secrets (cloud) or .env (local)."""
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key)
+
+api_key = get_secret("OPENAI_API_KEY")
+serpapi_key = get_secret("SERPAPI_KEY")
 
 st.set_page_config(page_title="FITFXR", page_icon="👟", layout="wide")
 
