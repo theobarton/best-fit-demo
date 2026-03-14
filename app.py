@@ -10,12 +10,9 @@ load_dotenv()
 def get_secret(key):
     """Read from Streamlit secrets (cloud) or .env (local), always at call time."""
     try:
-        val = st.secrets.get(key)
-        if val:
-            return val
+        return st.secrets[key]
     except Exception:
-        pass
-    return os.getenv(key, "")
+        return os.getenv(key, "")
 
 st.set_page_config(page_title="FITFXR", page_icon="👟", layout="wide")
 
