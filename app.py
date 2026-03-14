@@ -950,16 +950,12 @@ elif st.session_state.step == 5:
     if st.session_state.ai_results is None:
         u = st.session_state.user_data
 
-        # Always read keys fresh at runtime so Streamlit secrets are guaranteed loaded
+        # Read keys fresh at runtime
         api_key = get_secret("OPENAI_API_KEY")
         serpapi_key = get_secret("SERPAPI_KEY")
 
-        if not api_key:
-            st.error("❌ OpenAI API key missing. Add OPENAI_API_KEY to Streamlit secrets.")
-            st.stop()
-        if not serpapi_key:
-            st.error("❌ SerpAPI key missing. Add SERPAPI_KEY to Streamlit secrets.")
-            st.stop()
+        # Temporary debug — remove after confirming keys load
+        st.info(f"DEBUG — OpenAI key found: {'✅ yes' if api_key else '❌ no'} | SerpAPI key found: {'✅ yes' if serpapi_key else '❌ no'} | Secrets available: {list(st.secrets.keys()) if hasattr(st, 'secrets') else 'N/A'}")
 
         # Injury-aware constraint notes
         injury_notes = []
