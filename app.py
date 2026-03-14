@@ -953,6 +953,14 @@ elif st.session_state.step == 5:
     if st.session_state.ai_results is None:
         u = st.session_state.user_data
 
+        # Validate API keys before doing anything
+        if not api_key:
+            st.error("❌ OpenAI API key is missing. Add OPENAI_API_KEY to your Streamlit secrets.")
+            st.stop()
+        if not serpapi_key:
+            st.error("❌ SerpAPI key is missing. Add SERPAPI_KEY to your Streamlit secrets.")
+            st.stop()
+
         # Injury-aware constraint notes
         injury_notes = []
         injuries = u.get('injuries', [])
@@ -1019,17 +1027,23 @@ elif st.session_state.step == 5:
 
         system_prompt = (
             "You are FITFXR, an expert footwear and outdoor gear AI.\n"
-            "Given the user profile and their list of PRIMARY activities, generate ONE targeted Google Shopping "
-            "search query per activity. Each query should find the best real footwear or gear for that specific activity.\n\n"
-            "Return valid JSON only, with activity names as keys and search queries as values. Example:\n"
-            '{"Road Running": "Brooks Ghost 16 men stability running shoe", '
-            '"Skateboarding": "Nike SB Dunk Low vulcanized skate shoe mens"}\n\n'
+            "For each PRIMARY activity, generate exactly 3 Google Shopping search queries covering different product categories:\n"
+            "  1. Primary footwear (shoes/boots/skates/cleats — the most important)\n"
+            "  2. A closely related gear item (insoles, socks, bindings, pedals, etc.)\n"
+            "  3. A second gear or apparel item that pairs well with the activity\n\n"
+            "Return valid JSON only. Structure:\n"
+            '{"Road Running": {"footwear": "Brooks Ghost 16 men stability running shoe", '
+            '"gear_1": "Superfeet GREEN insoles arch support", '
+            '"gear_2": "Balega Hidden Comfort running socks men"}, '
+            '"Downhill Skiing": {"footwear": "Salomon S/Pro 120 ski boot men", '
+            '"gear_1": "Superfeet Yellow ski boot insoles", '
+            '"gear_2": "Smartwool ski socks men medium cushion"}}\n\n'
             "Rules:\n"
-            "- Name a specific real brand and model in each query\n"
-            "- Tailor each query to that activity's specific gear needs (boots vs shoes vs cleats vs skates, etc.)\n"
-            "- Apply ALL injury, width, and waterproof requirements to every query\n"
-            "- Use activity-specific details provided (sole type, flex, terrain, etc.) to sharpen each query\n"
-            "- Each query must find a buyable product on Google Shopping\n"
+            "- Name a specific real brand and model in EVERY query\n"
+            "- Footwear must match the activity exactly (boots/cleats/skates/shoes — never generic)\n"
+            "- Apply ALL injury, width, and waterproof requirements to the footwear query\n"
+            "- gear_1 and gear_2 must be distinct product types (not two shoe queries)\n"
+            "- Every query must find a buyable product on Google Shopping\n"
             "- Return ONLY the JSON object — no markdown, no explanation"
         )
 
@@ -1116,26 +1130,46 @@ elif st.session_state.step == 5:
         # Build a case-insensitive lookup for AI queries in case keys don't match exactly
         queries_lower = {k.lower(): v for k, v in queries.items()}
 
+        # Category labels shown as section headers in results
+        CATEGORY_LABELS = {
+            "footwear": "👟 Footwear",
+            "gear_1":   "🎒 Gear & Accessories",
+            "gear_2":   "⚡ Also Recommended",
+        }
+
+        def search_with_fallback(ai_query, fallback_query):
+            """Try AI query, fall back to generic if no results."""
+            if ai_query:
+                products = serpapi_search(ai_query)
+                if products:
+                    return ai_query, products
+            products = serpapi_search(fallback_query)
+            return fallback_query, products
+
         results = {}
         with st.spinner("Searching live stores for each activity..."):
             for act in primary_activities:
-                ai_query = queries.get(act) or queries_lower.get(act.lower()) or ""
-                generic_fallback = ACTIVITY_FALLBACK_TERMS.get(act, f"{act} shoes")
-                used_query = ai_query or generic_fallback
-                products = []
+                ai_act = queries.get(act) or queries_lower.get(act.lower()) or {}
+                # Support both old flat string format and new dict format from AI
+                if isinstance(ai_act, str):
+                    ai_act = {"footwear": ai_act}
+                generic_footwear = ACTIVITY_FALLBACK_TERMS.get(act, f"{act} shoes")
+                categories = {}
                 try:
-                    # 1. Try the AI-generated query
-                    if ai_query:
-                        products = serpapi_search(ai_query)
-
-                    # 2. If nothing, try the activity-specific generic term
-                    if not products:
-                        products = serpapi_search(generic_fallback)
-                        used_query = generic_fallback
-
-                    results[act] = {"query": used_query, "products": products}
+                    for cat_key, cat_label in CATEGORY_LABELS.items():
+                        ai_query = ai_act.get(cat_key, "")
+                        fallback = generic_footwear if cat_key == "footwear" else ""
+                        if not ai_query and not fallback:
+                            continue
+                        used_q, products = search_with_fallback(ai_query, fallback or ai_query)
+                        categories[cat_key] = {
+                            "label": cat_label,
+                            "query": used_q,
+                            "products": products,
+                        }
+                    results[act] = {"categories": categories}
                 except Exception as e:
-                    results[act] = {"query": used_query, "products": [], "error": str(e)}
+                    results[act] = {"categories": {}, "error": str(e)}
 
         st.session_state.ai_results = results
 
@@ -1183,37 +1217,43 @@ elif st.session_state.step == 5:
         for tab, act in zip(tabs, tab_labels):
             data = activity_results[act]
             with tab:
-                st.caption(f"Searched: *{data['query']}*")
-
                 if data.get("error"):
-                    st.warning(f"Could not load results: {data['error']}")
+                    st.warning(f"Search error: {data['error']}")
                     continue
 
-                products = data.get("products", [])
-                if not products:
-                    st.info(f"No live store results found for **{act}** right now. Try the Refine button below to search again.")
+                categories = data.get("categories", {})
+                if not categories:
+                    st.info(f"No results found for **{act}**. Try the Refine button below.")
                     continue
 
-                for i in range(0, len(products), 2):
-                    cols = st.columns(2)
-                    for j in range(2):
-                        if i + j < len(products):
-                            product = products[i + j]
-                            with cols[j]:
-                                with st.container(border=True):
-                                    if product.get("thumbnail"):
-                                        st.image(product["thumbnail"], use_container_width=True)
-                                    st.markdown(f"**{product.get('title', 'N/A')}**")
-                                    st.markdown(
-                                        f"<span class='price-tag'>{product.get('price', 'N/A')}</span>",
-                                        unsafe_allow_html=True
-                                    )
-                                    st.caption(f"From: {product.get('source', 'N/A')}")
-                                    if product.get("rating"):
-                                        st.caption(f"⭐ {product['rating']}  ({product.get('reviews', 0)} reviews)")
-                                    buy_link = product.get("link") or product.get("product_link")
-                                    if buy_link:
-                                        st.link_button("View & Buy →", buy_link)
+                for cat_key, cat_data in categories.items():
+                    st.subheader(cat_data["label"])
+                    st.caption(f"Searched: *{cat_data['query']}*")
+                    products = cat_data.get("products", [])
+                    if not products:
+                        st.info("No products found for this category.")
+                    else:
+                        for i in range(0, min(len(products), 6), 2):
+                            cols = st.columns(2)
+                            for j in range(2):
+                                if i + j < len(products):
+                                    product = products[i + j]
+                                    with cols[j]:
+                                        with st.container(border=True):
+                                            if product.get("thumbnail"):
+                                                st.image(product["thumbnail"], use_container_width=True)
+                                            st.markdown(f"**{product.get('title', 'N/A')}**")
+                                            st.markdown(
+                                                f"<span class='price-tag'>{product.get('price', 'N/A')}</span>",
+                                                unsafe_allow_html=True
+                                            )
+                                            st.caption(f"From: {product.get('source', 'N/A')}")
+                                            if product.get("rating"):
+                                                st.caption(f"⭐ {product['rating']}  ({product.get('reviews', 0)} reviews)")
+                                            buy_link = product.get("link") or product.get("product_link")
+                                            if buy_link:
+                                                st.link_button("View & Buy →", buy_link)
+                    st.divider()
 
     st.divider()
     col_a, col_b = st.columns(2)
