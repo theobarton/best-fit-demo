@@ -1054,45 +1054,88 @@ elif st.session_state.step == 5:
                 st.error(f"AI Error: {e}")
                 st.stop()
 
+        # Activity-specific fallback search terms (used when AI query returns no results)
+        ACTIVITY_FALLBACK_TERMS = {
+            "Road Running": "men's road running shoes",
+            "Trail Running": "trail running shoes",
+            "Ultramarathon": "ultra marathon trail running shoes",
+            "Cross Country Running": "cross country running shoes",
+            "Race Walking": "race walking shoes",
+            "Treadmill Running": "treadmill running shoes",
+            "Walking / Casual": "walking shoes",
+            "Day Hiking": "day hiking boots",
+            "Backpacking": "backpacking boots",
+            "Mountaineering / Alpine": "mountaineering boots",
+            "Rock Climbing": "rock climbing shoes",
+            "Water Sports / Kayaking": "water shoes kayaking",
+            "Hunting / Fishing": "hunting boots",
+            "Cycling / Mountain Biking": "mountain bike shoes SPD",
+            "Basketball": "basketball shoes",
+            "Tennis": "tennis shoes",
+            "Pickleball": "pickleball shoes",
+            "Volleyball": "volleyball shoes",
+            "Squash / Racquetball": "squash court shoes",
+            "Badminton": "badminton shoes",
+            "Soccer": "soccer cleats",
+            "Football (Cleats)": "football cleats",
+            "Baseball / Softball": "baseball cleats",
+            "Lacrosse": "lacrosse cleats",
+            "Rugby": "rugby boots",
+            "Ultimate Frisbee": "cleats ultimate frisbee",
+            "Field Hockey": "field hockey turf shoes",
+            "Weightlifting / CrossFit": "weightlifting shoes",
+            "HIIT Training": "cross training shoes",
+            "Yoga / Pilates": "yoga grip socks",
+            "Dance / Zumba": "dance aerobics shoes",
+            "Spin / Indoor Cycling": "indoor cycling shoes SPD",
+            "Rowing / Erg": "rowing training shoes",
+            "Downhill Skiing": "downhill ski boots",
+            "Cross-Country Skiing": "cross country ski boots",
+            "Snowboarding": "snowboard boots",
+            "Ice Skating": "ice skates",
+            "Snowshoeing": "winter hiking boots waterproof",
+            "Skateboarding": "skate shoes vulcanized",
+            "Golf": "golf shoes spikeless",
+            "Work / Standing All Day": "work shoes slip resistant",
+            "Casual / Streetwear": "casual sneakers",
+            "Travel / Light Hiking": "travel walking shoes",
+            "Cowboy / Western": "western boots",
+        }
+
+        def serpapi_search(query):
+            s = GoogleSearch({
+                "engine": "google_shopping",
+                "q": query,
+                "api_key": serpapi_key,
+                "num": 10,
+                "gl": "us",
+                "hl": "en",
+            })
+            return s.get_dict().get("shopping_results", [])[:10]
+
         # Build a case-insensitive lookup for AI queries in case keys don't match exactly
         queries_lower = {k.lower(): v for k, v in queries.items()}
 
         results = {}
         with st.spinner("Searching live stores for each activity..."):
             for act in primary_activities:
-                # Try exact match first, then case-insensitive, then fallback generic query
-                query = queries.get(act) or queries_lower.get(act.lower()) or f"{act} shoes"
+                ai_query = queries.get(act) or queries_lower.get(act.lower()) or ""
+                generic_fallback = ACTIVITY_FALLBACK_TERMS.get(act, f"{act} shoes")
+                used_query = ai_query or generic_fallback
+                products = []
                 try:
-                    search = GoogleSearch({
-                        "engine": "google_shopping",
-                        "q": query,
-                        "api_key": serpapi_key,
-                        "num": 10,
-                        "gl": "us",
-                        "hl": "en",
-                    })
-                    data = search.get_dict()
-                    products = data.get("shopping_results", [])[:10]
+                    # 1. Try the AI-generated query
+                    if ai_query:
+                        products = serpapi_search(ai_query)
 
-                    # If specific query returned nothing, retry with a simpler fallback
+                    # 2. If nothing, try the activity-specific generic term
                     if not products:
-                        fallback_query = f"{act} shoes"
-                        search2 = GoogleSearch({
-                            "engine": "google_shopping",
-                            "q": fallback_query,
-                            "api_key": serpapi_key,
-                            "num": 10,
-                            "gl": "us",
-                            "hl": "en",
-                        })
-                        data2 = search2.get_dict()
-                        products = data2.get("shopping_results", [])[:10]
-                        if products:
-                            query = fallback_query
+                        products = serpapi_search(generic_fallback)
+                        used_query = generic_fallback
 
-                    results[act] = {"query": query, "products": products}
+                    results[act] = {"query": used_query, "products": products}
                 except Exception as e:
-                    results[act] = {"query": query, "products": [], "error": str(e)}
+                    results[act] = {"query": used_query, "products": [], "error": str(e)}
 
         st.session_state.ai_results = results
 
