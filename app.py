@@ -954,8 +954,17 @@ elif st.session_state.step == 5:
         api_key = get_secret("OPENAI_API_KEY")
         serpapi_key = get_secret("SERPAPI_KEY")
 
-        # Temporary debug — remove after confirming keys load
-        st.info(f"DEBUG — OpenAI key found: {'✅ yes' if api_key else '❌ no'} | SerpAPI key found: {'✅ yes' if serpapi_key else '❌ no'} | Secrets available: {list(st.secrets.keys()) if hasattr(st, 'secrets') else 'N/A'}")
+        if not api_key or not serpapi_key:
+            missing = []
+            if not api_key:
+                missing.append("OPENAI_API_KEY")
+            if not serpapi_key:
+                missing.append("SERPAPI_KEY")
+            st.error(
+                f"Missing API key(s): **{', '.join(missing)}**. "
+                "Add them to `.streamlit/secrets.toml` (cloud) or your `.env` file (local), then refresh."
+            )
+            st.stop()
 
         # Injury-aware constraint notes
         injury_notes = []
