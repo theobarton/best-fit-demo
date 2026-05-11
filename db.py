@@ -12,8 +12,16 @@ def _get_secret(key):
 
 
 def get_client() -> Client:
+    """Anon-key client — use for auth operations (sign up, sign in, sign out)."""
     url = _get_secret("SUPABASE_URL")
     key = _get_secret("SUPABASE_KEY")
+    return create_client(url, key)
+
+
+def get_service_client() -> Client:
+    """Service-role client — bypasses RLS for server-side writes."""
+    url = _get_secret("SUPABASE_URL")
+    key = _get_secret("SUPABASE_SERVICE_KEY") or _get_secret("SUPABASE_KEY")
     return create_client(url, key)
 
 
@@ -25,7 +33,7 @@ def save_session(user_data: dict, ai_results: dict,
     Returns session UUID on success, None on failure (never raises).
     """
     try:
-        sb = get_client()
+        sb = get_service_client()
 
         session_row = {
             "username":   username,

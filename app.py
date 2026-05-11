@@ -655,9 +655,15 @@ with st.sidebar:
     st.markdown("## FITFXR")
     if st.session_state.step > 0:
         if st.session_state.logged_in:
-            st.markdown(f"👋 **{st.session_state.username}**")
+            _dname = st.session_state.username.split("@")[0] if "@" in st.session_state.username else st.session_state.username
+            st.markdown(f"👋 **{_dname}**")
             st.caption("Profile active")
             if st.button("Log Out"):
+                try:
+                    from db import get_client as _sb
+                    _sb().auth.sign_out()
+                except Exception:
+                    pass
                 st.session_state.logged_in = False
                 st.session_state.step = 0
                 st.rerun()
@@ -722,15 +728,31 @@ if st.session_state.step == 0:
 
         with tab_signup:
             su_email = st.text_input("Email", key="su_email", placeholder="you@email.com")
-            su_pw = st.text_input("Password", type="password", key="su_pw", placeholder="Create a password")
+            su_pw = st.text_input("Password", type="password", key="su_pw", placeholder="Create a password (min 6 chars)")
             if st.button("Create My Account →", use_container_width=True, key="btn_signup"):
-                if su_email:
-                    st.session_state.logged_in = True
-                    st.session_state.username = su_email.split("@")[0]
-                    next_step()
-                    st.rerun()
+                if not su_email or not su_pw:
+                    st.error("Please enter your email and a password.")
+                elif len(su_pw) < 6:
+                    st.error("Password must be at least 6 characters.")
                 else:
-                    st.error("Please enter your email.")
+                    try:
+                        from db import get_client as _sb
+                        resp = _sb().auth.sign_up({"email": su_email, "password": su_pw})
+                        if resp.session:
+                            st.session_state.logged_in = True
+                            st.session_state.username = su_email
+                            next_step()
+                            st.rerun()
+                        elif resp.user:
+                            st.success("Account created! Check your email to confirm, then log in.")
+                        else:
+                            st.error("Sign up failed. Please try again.")
+                    except Exception as e:
+                        msg = str(e).lower()
+                        if "already registered" in msg or "already exists" in msg:
+                            st.error("An account with this email already exists. Try logging in.")
+                        else:
+                            st.error(f"Sign up failed: {e}")
             st.caption("No credit card. No spam. Ever.")
             st.divider()
             st.button("🔐 Continue with Google", use_container_width=True, disabled=True,
@@ -740,13 +762,22 @@ if st.session_state.step == 0:
             li_email = st.text_input("Email", key="li_email", placeholder="you@email.com")
             li_pw = st.text_input("Password", type="password", key="li_pw")
             if st.button("Log In →", use_container_width=True, key="btn_login"):
-                if li_email:
-                    st.session_state.logged_in = True
-                    st.session_state.username = li_email.split("@")[0]
-                    next_step()
-                    st.rerun()
+                if not li_email or not li_pw:
+                    st.error("Please enter your email and password.")
                 else:
-                    st.error("Please enter your email.")
+                    try:
+                        from db import get_client as _sb
+                        resp = _sb().auth.sign_in_with_password({"email": li_email, "password": li_pw})
+                        st.session_state.logged_in = True
+                        st.session_state.username = li_email
+                        next_step()
+                        st.rerun()
+                    except Exception as e:
+                        msg = str(e).lower()
+                        if "email not confirmed" in msg:
+                            st.error("Please confirm your email first — check your inbox.")
+                        else:
+                            st.error("Invalid email or password. Please try again.")
             st.divider()
             st.button("🔐 Continue with Google", use_container_width=True, disabled=True,
                       help="Google Sign-In coming soon.", key="google_btn_login")
@@ -1252,7 +1283,9 @@ elif st.session_state.step == 5:
     # ── Render results ────────────────────────────────────────────────────────
     st.balloons()
 
-    greeting = f"Your Gear, {st.session_state.username}" if st.session_state.logged_in else "Your Gear Matches"
+    _uname = st.session_state.username
+    _dname = _uname.split("@")[0] if "@" in _uname else _uname
+    greeting = f"Your Gear, {_dname}" if st.session_state.logged_in else "Your Gear Matches"
     st.subheader(greeting)
 
     if st.session_state.logged_in:
