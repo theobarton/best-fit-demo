@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import json
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 from serpapi import GoogleSearch
@@ -573,6 +574,60 @@ def collect_activity_answers(activity):
     return answers
 
 
+def parse_price(price_str):
+    if not price_str:
+        return float('inf')
+    nums = re.findall(r'[\d]+\.?\d*', str(price_str).replace(',', ''))
+    return float(nums[0]) if nums else float('inf')
+
+
+def render_product_tiers(products, act, cat_key):
+    """Show 3 products (budget / best value / premium) with a More Choices button."""
+    if not products:
+        st.info("No products found for this category.")
+        return
+
+    priced = sorted(
+        [p for p in products if parse_price(p.get('price')) < float('inf')],
+        key=lambda p: parse_price(p.get('price'))
+    )
+    unpriced = [p for p in products if parse_price(p.get('price')) >= float('inf')]
+    sorted_products = priced + unpriced
+
+    n = len(sorted_products)
+    offset_key = f"offset_{act}_{cat_key}"
+    if offset_key not in st.session_state:
+        st.session_state[offset_key] = 0
+
+    offset = st.session_state[offset_key] % n
+    display = [sorted_products[(offset + i) % n] for i in range(min(3, n))]
+
+    tier_labels = ["💰 Budget Pick", "⚖️ Best Value", "🔥 Premium"]
+    cols = st.columns(len(display))
+    for col, product, label in zip(cols, display, tier_labels):
+        with col:
+            st.caption(label)
+            with st.container(border=True):
+                if product.get("thumbnail"):
+                    st.image(product["thumbnail"], use_container_width=True)
+                st.markdown(f"**{product.get('title', 'N/A')}**")
+                st.markdown(
+                    f"<span class='price-tag'>{product.get('price', 'N/A')}</span>",
+                    unsafe_allow_html=True
+                )
+                st.caption(f"From: {product.get('source', 'N/A')}")
+                if product.get("rating"):
+                    st.caption(f"⭐ {product['rating']}  ({product.get('reviews', 0)} reviews)")
+                buy_link = product.get("link") or product.get("product_link")
+                if buy_link:
+                    st.link_button("View & Buy →", buy_link)
+
+    if n > 3:
+        if st.button("🔄 Get More Choices", key=f"more_{act}_{cat_key}"):
+            st.session_state[offset_key] = (st.session_state[offset_key] + 3) % n
+            st.rerun()
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 for key, default in [
     ('step', 0), ('logged_in', False), ('username', 'Guest'), ('ai_results', None)
@@ -620,6 +675,18 @@ with st.sidebar:
                     st.caption(f"▶️ **{name}**")
                 else:
                     st.caption(f"○ {name}")
+        if 1 <= st.session_state.step <= 4:
+            st.divider()
+            has_activities = bool(st.session_state.user_data.get('selected_activities'))
+            if has_activities:
+                if st.button("⚡ Skip to Results →", use_container_width=True, key="sidebar_skip"):
+                    st.session_state.step = 5
+                    st.rerun()
+            else:
+                if st.button("⚡ Skip to Results →", use_container_width=True, key="sidebar_skip"):
+                    st.session_state.step = 3
+                    st.rerun()
+                st.caption("Pick activities first to skip ahead.")
     st.divider()
     st.caption("© 2025 FITFXR Inc.")
 
@@ -954,9 +1021,6 @@ elif st.session_state.step == 5:
         api_key = get_secret("OPENAI_API_KEY")
         serpapi_key = get_secret("SERPAPI_KEY")
 
-        # Temporary debug — remove after confirming keys load
-        st.info(f"DEBUG — OpenAI key found: {'✅ yes' if api_key else '❌ no'} | SerpAPI key found: {'✅ yes' if serpapi_key else '❌ no'} | Secrets available: {list(st.secrets.keys()) if hasattr(st, 'secrets') else 'N/A'}")
-
         # Injury-aware constraint notes
         injury_notes = []
         injuries = u.get('injuries', [])
@@ -1225,30 +1289,7 @@ elif st.session_state.step == 5:
                 for cat_key, cat_data in categories.items():
                     st.subheader(cat_data["label"])
                     st.caption(f"Searched: *{cat_data['query']}*")
-                    products = cat_data.get("products", [])
-                    if not products:
-                        st.info("No products found for this category.")
-                    else:
-                        for i in range(0, min(len(products), 6), 2):
-                            cols = st.columns(2)
-                            for j in range(2):
-                                if i + j < len(products):
-                                    product = products[i + j]
-                                    with cols[j]:
-                                        with st.container(border=True):
-                                            if product.get("thumbnail"):
-                                                st.image(product["thumbnail"], use_container_width=True)
-                                            st.markdown(f"**{product.get('title', 'N/A')}**")
-                                            st.markdown(
-                                                f"<span class='price-tag'>{product.get('price', 'N/A')}</span>",
-                                                unsafe_allow_html=True
-                                            )
-                                            st.caption(f"From: {product.get('source', 'N/A')}")
-                                            if product.get("rating"):
-                                                st.caption(f"⭐ {product['rating']}  ({product.get('reviews', 0)} reviews)")
-                                            buy_link = product.get("link") or product.get("product_link")
-                                            if buy_link:
-                                                st.link_button("View & Buy →", buy_link)
+                    render_product_tiers(cat_data.get("products", []), act, cat_key)
                     st.divider()
 
     st.divider()

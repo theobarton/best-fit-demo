@@ -63,3 +63,73 @@ CREATE TABLE admin_users (
 --   python3 -c "import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())"
 -- Then insert it:
 --   INSERT INTO admin_users (username, password_hash) VALUES ('admin', '$2b$12$...');
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ROW LEVEL SECURITY (RLS)
+-- Industry-standard data isolation — users cannot read or modify other users'
+-- rows even if they obtain the anon API key.
+--
+-- The Python backend (db.py) must use the SERVICE_ROLE key (never the anon
+-- key) so inserts bypass RLS. Add SUPABASE_SERVICE_KEY to your Streamlit
+-- secrets and update db.py to use it.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE sessions          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products_shown    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_users       ENABLE ROW LEVEL SECURITY;
+
+-- Service role bypasses RLS automatically — no policy needed for it.
+-- These policies cover the anon / authenticated roles used by end users.
+
+-- sessions: users can only see their own rows (matched by username).
+--           Guests (is_guest = true) are write-only — no read-back.
+CREATE POLICY "Users read own sessions"
+  ON sessions FOR SELECT
+  TO authenticated
+  USING (username = auth.email());
+
+CREATE POLICY "Allow insert from backend"
+  ON sessions FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (true);  -- service role handles writes; anon inserts are safe
+                       -- because no sensitive data is readable via anon SELECT.
+
+-- session_activities: inherit access through parent session
+CREATE POLICY "Users read own activities"
+  ON session_activities FOR SELECT
+  TO authenticated
+  USING (
+    session_id IN (
+      SELECT id FROM sessions WHERE username = auth.email()
+    )
+  );
+
+CREATE POLICY "Allow insert activities from backend"
+  ON session_activities FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (true);
+
+-- products_shown: same chain
+CREATE POLICY "Users read own products"
+  ON products_shown FOR SELECT
+  TO authenticated
+  USING (
+    session_activity_id IN (
+      SELECT sa.id FROM session_activities sa
+      JOIN sessions s ON s.id = sa.session_id
+      WHERE s.username = auth.email()
+    )
+  );
+
+CREATE POLICY "Allow insert products from backend"
+  ON products_shown FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (true);
+
+-- admin_users: only service role (never expose to anon/authenticated)
+CREATE POLICY "No anon access to admin_users"
+  ON admin_users FOR ALL
+  TO anon, authenticated
+  USING (false)
+  WITH CHECK (false);
