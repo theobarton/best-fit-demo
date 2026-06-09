@@ -15,17 +15,17 @@ def get_secret(key):
     except Exception:
         return os.getenv(key, "")
 
-st.set_page_config(page_title="FITFXR", page_icon="👟", layout="wide")
+st.set_page_config(page_title="FITFXR — The Right Fit Changes Everything", page_icon="👟", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #F2F2F0; }
+    .stApp { background-color: #F5F6FA; }
     h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #1B4D3E !important;
+        color: #1B2F6E !important;
         font-family: 'Helvetica Neue', Helvetica, sans-serif;
     }
     .stButton > button {
-        background-color: #FF4500 !important;
+        background-color: #E8A020 !important;
         color: white !important;
         border-radius: 6px;
         border: none;
@@ -34,32 +34,50 @@ st.markdown("""
         transition: all 0.15s ease;
     }
     .stButton > button:hover {
-        background-color: #E03E00 !important;
-        box-shadow: 0 4px 14px rgba(255,69,0,0.35);
+        background-color: #D4911A !important;
+        box-shadow: 0 4px 14px rgba(232,160,32,0.40);
         transform: translateY(-1px);
     }
-    .price-tag { color: #FF4500; font-weight: 800; font-size: 1.15em; }
+    .price-tag { color: #E8A020; font-weight: 800; font-size: 1.15em; }
     .hero-brand {
         font-size: 5em;
         font-weight: 900;
-        color: #1B4D3E;
+        color: #1B2F6E;
         letter-spacing: -3px;
         line-height: 1;
     }
+    .hero-tagline {
+        font-size: 1.1em;
+        font-weight: 700;
+        color: #E8A020;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-top: -8px;
+        margin-bottom: 12px;
+    }
     .value-prop {
         background: white;
-        border-left: 4px solid #1B4D3E;
+        border-left: 4px solid #1B2F6E;
         border-radius: 6px;
         padding: 14px 18px;
         margin-bottom: 10px;
         font-size: 0.97em;
     }
     .founding-badge {
-        background: linear-gradient(135deg, #1B4D3E, #2d7a63);
+        background: linear-gradient(135deg, #1B2F6E, #2a4494);
         color: white;
         border-radius: 10px;
         padding: 16px 20px;
         margin-top: 20px;
+    }
+    .mission-bar {
+        background: #1B2F6E;
+        color: white;
+        border-radius: 8px;
+        padding: 14px 20px;
+        margin-bottom: 16px;
+        font-size: 0.98em;
+        line-height: 1.5;
     }
     div[data-testid="stTabs"] button { font-weight: 600; }
 </style>
@@ -622,6 +640,8 @@ def render_product_tiers(products, act, cat_key):
                 if buy_link:
                     st.link_button("View & Buy →", buy_link)
 
+    st.caption("_When you find your shoe, more color options are likely available — click through to see all styles._")
+
     if n > 3:
         if st.button("🔄 Get More Choices", key=f"more_{act}_{cat_key}"):
             st.session_state[offset_key] = (st.session_state[offset_key] + 3) % n
@@ -707,11 +727,19 @@ if st.session_state.step == 0:
 
     with col_hero:
         st.markdown('<p class="hero-brand">FITFXR</p>', unsafe_allow_html=True)
-        st.markdown("### AI-powered gear that fits your body, your activity, and your life.")
+        st.markdown('<p class="hero-tagline">— The Right Fit Changes Everything —</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="mission-bar">'
+            'Welcome to FITFXR — your custom, research-driven fitting consultant. '
+            'No sponsors. No ads. No hidden agendas. '
+            'We help <strong>YOU</strong> find what <strong>YOU</strong> need for your best fit.'
+            '</div>',
+            unsafe_allow_html=True
+        )
         st.markdown("---")
         for prop in [
             "💾  Save your measurements — never fill out a form twice",
-            "🎯  Get a personalized *For You* gear feed that improves over time",
+            "🎯  Data-driven recommendations tailored to your body and activity",
             "🔖  Bookmark gear to your Locker",
             "📣  Early access to new brands and drops",
         ]:
@@ -821,9 +849,15 @@ elif st.session_state.step == 1:
     ]
     height_opts = [
         "--- Select ---",
-        "Under 4'9\"", "4'9\" – 5'0\"", "5'0\" – 5'3\"",
-        "5'3\" – 5'6\"", "5'6\" – 5'9\"", "5'9\" – 6'0\"",
-        "6'0\" – 6'3\"", "6'3\" – 6'6\"", "Over 6'6\"",
+        "Under 4'9\" (< 145 cm)",
+        "4'9\" – 5'0\" (145–152 cm)",
+        "5'0\" – 5'3\" (152–160 cm)",
+        "5'3\" – 5'6\" (160–168 cm)",
+        "5'6\" – 5'9\" (168–175 cm)",
+        "5'9\" – 6'0\" (175–183 cm)",
+        "6'0\" – 6'3\" (183–190 cm)",
+        "6'3\" – 6'6\" (190–198 cm)",
+        "Over 6'6\" (> 198 cm)",
     ]
 
     col1, col2 = st.columns(2)
@@ -1132,6 +1166,8 @@ elif st.session_state.step == 5:
             "Rules:\n"
             "- Name a specific real brand and model in EVERY query\n"
             "- Footwear must match the activity exactly (boots/cleats/skates/shoes — never generic)\n"
+            "- ALWAYS include the user's sex in footwear queries: 'women's' for Woman, 'men's' for Man\n"
+            "- ALWAYS apply arch type to footwear queries (e.g. 'high arch support', 'neutral arch')\n"
             "- Apply ALL injury, width, and waterproof requirements to the footwear query\n"
             "- gear_1 and gear_2 must be distinct product types (not two shoe queries)\n"
             "- Every query must find a buyable product on Google Shopping\n"
@@ -1143,7 +1179,7 @@ elif st.session_state.step == 5:
             f"PRIMARY activities to generate queries for:\n{activities_block}"
         )
 
-        with st.spinner("Analyzing your profile and activities..."):
+        with st.spinner("Be patient — just taking the time to get your fit right..."):
             try:
                 client = OpenAI(api_key=api_key)
                 response = client.chat.completions.create(
@@ -1238,7 +1274,7 @@ elif st.session_state.step == 5:
             return fallback_query, products
 
         results = {}
-        with st.spinner("Searching live stores for each activity..."):
+        with st.spinner("Searching live stores — your perfect fit is worth the wait..."):
             for act in primary_activities:
                 ai_act = queries.get(act) or queries_lower.get(act.lower()) or {}
                 # Support both old flat string format and new dict format from AI
@@ -1298,6 +1334,27 @@ elif st.session_state.step == 5:
         st.code("https://fitfxr.com", language=None)
         st.caption("Referrals help us grow and unlock exclusive partner deals for our community.")
 
+    col_ns, _ = st.columns([1, 3])
+    with col_ns:
+        if st.button("🔁 Start New Search", key="new_search_top"):
+            for k in list(st.session_state.keys()):
+                if k.startswith("act_") or "__" in k or k.startswith("offset_") or k.startswith("more_"):
+                    try:
+                        del st.session_state[k]
+                    except Exception:
+                        pass
+            st.session_state.ai_results = None
+            st.session_state.user_data = {
+                'age': None, 'sex': None, 'weight': None, 'height': None,
+                'shoe_size': None, 'width': None, 'arch': None,
+                'injuries': [],
+                'selected_activities': [],
+                'priorities': [],
+                'waterproof': None,
+            }
+            st.session_state.step = 1
+            st.rerun()
+
     st.divider()
 
     activity_results = st.session_state.ai_results
@@ -1333,7 +1390,21 @@ elif st.session_state.step == 5:
             st.session_state.step = 4
             st.rerun()
     with col_b:
-        if st.button("Start Over"):
-            st.session_state.step = 1
+        if st.button("🔁 Start New Search"):
+            for k in list(st.session_state.keys()):
+                if k.startswith("act_") or "__" in k or k.startswith("offset_") or k.startswith("more_"):
+                    try:
+                        del st.session_state[k]
+                    except Exception:
+                        pass
             st.session_state.ai_results = None
+            st.session_state.user_data = {
+                'age': None, 'sex': None, 'weight': None, 'height': None,
+                'shoe_size': None, 'width': None, 'arch': None,
+                'injuries': [],
+                'selected_activities': [],
+                'priorities': [],
+                'waterproof': None,
+            }
+            st.session_state.step = 1
             st.rerun()

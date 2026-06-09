@@ -1,6 +1,11 @@
 [theme]
-primaryColor = "#FF4500"       # Aerospace Orange (Buttons, Focus)
-backgroundColor = "#F2F2F0"    # Creamish Gray (Main Background)
-secondaryBackgroundColor = "#E6E6E1" # Slightly Darker Cream (Sidebar/Inputs)
-textColor = "#1B4D3E"          # Forest Green (Text)
+primaryColor = "#E8A020"
+backgroundColor = "#F5F6FA"
+secondaryBackgroundColor = "#ECEEF5"
+textColor = "#1B2F6E"
 font = "sans serif"
+
+[server]
+port = 8501
+address = "0.0.0.0"
+headless = true
