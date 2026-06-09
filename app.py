@@ -1361,25 +1361,28 @@ elif st.session_state.step == 5:
     if not activity_results:
         st.warning("No results were generated. Try going back and adjusting your activities.")
     else:
-        tab_labels = list(activity_results.keys())
-        tabs = st.tabs(tab_labels)
+        acts = list(activity_results.keys())
+        selected_act = st.selectbox(
+            "Viewing results for:",
+            acts,
+            index=len(acts) - 1,
+            key="results_activity_selector"
+        )
+        st.markdown(f"### {selected_act}")
+        st.divider()
 
-        for tab, act in zip(tabs, tab_labels):
-            data = activity_results[act]
-            with tab:
-                if data.get("error"):
-                    st.warning(f"Search error: {data['error']}")
-                    continue
-
-                categories = data.get("categories", {})
-                if not categories:
-                    st.info(f"No results found for **{act}**. Try the Refine button below.")
-                    continue
-
+        data = activity_results[selected_act]
+        if data.get("error"):
+            st.warning(f"Search error: {data['error']}")
+        else:
+            categories = data.get("categories", {})
+            if not categories:
+                st.info(f"No results found for **{selected_act}**. Try the Refine button below.")
+            else:
                 for cat_key, cat_data in categories.items():
                     st.subheader(cat_data["label"])
                     st.caption(f"Searched: *{cat_data['query']}*")
-                    render_product_tiers(cat_data.get("products", []), act, cat_key)
+                    render_product_tiers(cat_data.get("products", []), selected_act, cat_key)
                     st.divider()
 
     st.divider()
