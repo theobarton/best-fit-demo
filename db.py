@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 from supabase import create_client, Client
 
 
@@ -85,3 +86,51 @@ def save_session(user_data: dict, ai_results: dict,
     except Exception as e:
         print(f"[FITFXR DB] Session save failed: {e}")
         return None
+
+
+def load_user_profile(username: str) -> dict | None:
+    """Load saved biometric profile for a returning user. Returns None if not found."""
+    try:
+        sb = get_service_client()
+        resp = sb.table("user_profiles").select("*").eq("username", username).execute()
+        if resp.data:
+            row = resp.data[0]
+            return {
+                "age":                row.get("age"),
+                "sex":                row.get("sex"),
+                "weight":             row.get("weight"),
+                "height":             row.get("height"),
+                "shoe_size":          row.get("shoe_size"),
+                "width":              row.get("width"),
+                "arch":               row.get("arch"),
+                "injuries":           row.get("injuries") or [],
+                "waterproof":         row.get("waterproof"),
+                "priorities":         row.get("priorities") or [],
+                "selected_activities": [],
+            }
+        return None
+    except Exception as e:
+        print(f"[FITFXR DB] Profile load failed: {e}")
+        return None
+
+
+def save_user_profile(username: str, user_data: dict) -> None:
+    """Upsert biometric profile so it's pre-filled on next login."""
+    try:
+        sb = get_service_client()
+        sb.table("user_profiles").upsert({
+            "username":   username,
+            "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "age":        user_data.get("age"),
+            "sex":        user_data.get("sex"),
+            "weight":     user_data.get("weight"),
+            "height":     user_data.get("height"),
+            "shoe_size":  user_data.get("shoe_size"),
+            "width":      user_data.get("width"),
+            "arch":       user_data.get("arch"),
+            "injuries":   user_data.get("injuries", []),
+            "waterproof": user_data.get("waterproof"),
+            "priorities": user_data.get("priorities", []),
+        }).execute()
+    except Exception as e:
+        print(f"[FITFXR DB] Profile save failed: {e}")

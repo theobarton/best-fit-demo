@@ -52,7 +52,36 @@ CREATE TABLE products_shown (
 CREATE INDEX idx_products_sa   ON products_shown(session_activity_id);
 CREATE INDEX idx_products_src  ON products_shown(source);
 
--- 4. Admin users (for the /admin dashboard)
+-- 4. User profiles — persistent preferences loaded on login
+CREATE TABLE user_profiles (
+    username    TEXT PRIMARY KEY,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    age         TEXT,
+    sex         TEXT,
+    weight      TEXT,
+    height      TEXT,
+    shoe_size   TEXT,
+    width       TEXT,
+    arch        TEXT,
+    injuries    JSONB NOT NULL DEFAULT '[]',
+    waterproof  TEXT,
+    priorities  JSONB NOT NULL DEFAULT '[]'
+);
+
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own profile"
+  ON user_profiles FOR ALL
+  TO authenticated
+  USING (username = auth.email())
+  WITH CHECK (username = auth.email());
+
+CREATE POLICY "Allow insert profile from backend"
+  ON user_profiles FOR ALL
+  TO anon
+  WITH CHECK (true);
+
+-- 5. Admin users (for the /admin dashboard)
 CREATE TABLE admin_users (
     id            SERIAL PRIMARY KEY,
     username      TEXT UNIQUE NOT NULL,

@@ -794,11 +794,16 @@ if st.session_state.step == 0:
                     st.error("Please enter your email and password.")
                 else:
                     try:
-                        from db import get_client as _sb
+                        from db import get_client as _sb, load_user_profile
                         resp = _sb().auth.sign_in_with_password({"email": li_email, "password": li_pw})
                         st.session_state.logged_in = True
                         st.session_state.username = li_email
-                        next_step()
+                        profile = load_user_profile(li_email)
+                        if profile:
+                            st.session_state.user_data = profile
+                            st.session_state.step = 3
+                        else:
+                            next_step()
                         st.rerun()
                     except Exception as e:
                         msg = str(e).lower()
@@ -1315,6 +1320,13 @@ elif st.session_state.step == 5:
             )
         except Exception:
             pass  # Never block the user if DB is unavailable
+
+        if st.session_state.get("logged_in"):
+            try:
+                from db import save_user_profile
+                save_user_profile(st.session_state.get("username"), st.session_state.user_data)
+            except Exception:
+                pass
 
     # ── Render results ────────────────────────────────────────────────────────
     st.balloons()
