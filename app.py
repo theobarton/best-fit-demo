@@ -8,6 +8,11 @@ from serpapi import GoogleSearch
 
 load_dotenv()
 
+# set_page_config must be the first Streamlit command executed — any st.* call
+# before it (including st.secrets lookups in the diagnostics block below) makes
+# Streamlit reject this call at runtime.
+st.set_page_config(page_title="FITFXR — The Right Fit Changes Everything", page_icon="👟", layout="wide")
+
 def get_secret(key):
     """Read from Streamlit secrets (cloud) or .env (local), always at call time."""
     try:
@@ -23,8 +28,6 @@ for _k in _REQUIRED_KEYS:
     _v = get_secret(_k)
     _status = f"OK (len={len(_v)})" if _v else "MISSING OR EMPTY"
     print(f"[FITFXR KEY CHECK] {_k}: {_status}", file=sys.stderr, flush=True)
-
-st.set_page_config(page_title="FITFXR — The Right Fit Changes Everything", page_icon="👟", layout="wide")
 
 st.markdown("""
 <style>
