@@ -13,12 +13,22 @@ load_dotenv()
 # Streamlit reject this call at runtime.
 st.set_page_config(page_title="FITFXR — The Right Fit Changes Everything", page_icon="👟", layout="wide")
 
+# Only probe st.secrets when a secrets.toml actually exists — accessing it
+# otherwise logs a noisy "No secrets found" warning on every single call.
+_SECRETS_FILE_CANDIDATES = [
+    os.path.join(".streamlit", "secrets.toml"),
+    os.path.join(os.path.expanduser("~"), ".streamlit", "secrets.toml"),
+]
+_HAS_SECRETS_FILE = any(os.path.exists(p) for p in _SECRETS_FILE_CANDIDATES)
+
 def get_secret(key):
     """Read from Streamlit secrets (cloud) or .env (local), always at call time."""
-    try:
-        return st.secrets[key]
-    except Exception:
-        return os.getenv(key, "")
+    if _HAS_SECRETS_FILE:
+        try:
+            return st.secrets[key]
+        except Exception:
+            pass
+    return os.getenv(key, "")
 
 # ── Startup diagnostics (visible in Render logs) ──────────────────────────────
 import sys
@@ -76,24 +86,6 @@ st.markdown("""
         transform: translateY(-1px);
     }
     .price-tag { color: #E8A020; font-weight: 800; font-size: 1.15em; }
-    .stMarkdown p.hero-brand {
-        font-size: clamp(3em, 14vw, 6em) !important;
-        font-weight: 900 !important;
-        color: #1B2F6E;
-        letter-spacing: -3px;
-        line-height: 1 !important;
-        text-align: center;
-    }
-    .stMarkdown p.hero-tagline {
-        font-size: clamp(1em, 3vw, 1.3em) !important;
-        font-weight: 700 !important;
-        color: #E8A020;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin-top: -4px;
-        margin-bottom: 12px;
-        text-align: center;
-    }
     .value-prop {
         background: white;
         border-left: 4px solid #1B2F6E;
@@ -803,8 +795,9 @@ if 1 <= st.session_state.step <= 5:
 # STEP 0: LANDING / LOGIN
 # ==========================================
 if st.session_state.step == 0:
-    st.markdown('<p class="hero-brand">👟 FITFXR</p>', unsafe_allow_html=True)
-    st.markdown('<p class="hero-tagline">— The Right Fit Changes Everything —</p>', unsafe_allow_html=True)
+    _, col_logo, _ = st.columns([1, 3, 1])
+    with col_logo:
+        st.image("assets/logo.jpg", use_container_width=True)
 
     col_hero, col_auth = st.columns([3, 2], gap="large")
 
