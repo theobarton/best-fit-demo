@@ -15,22 +15,56 @@ def get_secret(key):
     except Exception:
         return os.getenv(key, "")
 
+# ── Startup diagnostics (visible in Render logs) ──────────────────────────────
+import sys
+_REQUIRED_KEYS = ["SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_SERVICE_KEY",
+                  "OPENAI_API_KEY", "SERPAPI_KEY"]
+for _k in _REQUIRED_KEYS:
+    _v = get_secret(_k)
+    _status = f"OK (len={len(_v)})" if _v else "MISSING OR EMPTY"
+    print(f"[FITFXR KEY CHECK] {_k}: {_status}", file=sys.stderr, flush=True)
+
 st.set_page_config(page_title="FITFXR — The Right Fit Changes Everything", page_icon="👟", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #F5F6FA; }
+    .stApp { background-color: #F5F6FA; font-size: 16px; line-height: 1.5; }
     h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         color: #1B2F6E !important;
         font-family: 'Helvetica Neue', Helvetica, sans-serif;
+        line-height: 1.25 !important;
+    }
+    h1, .stMarkdown h1 { font-size: clamp(26px, 6vw, 40px) !important; }
+    h2, .stMarkdown h2 { font-size: clamp(22px, 5vw, 32px) !important; }
+    h3, .stMarkdown h3 { font-size: clamp(19px, 4vw, 26px) !important; }
+
+    /* Body copy, labels, widget text — 16-18px minimum, bolder for scanability */
+    .stMarkdown p, .stMarkdown li,
+    label, div[data-testid="stWidgetLabel"] p,
+    .stCheckbox label p, .stRadio label p {
+        font-size: 16px !important;
+        line-height: 1.5 !important;
+        font-weight: 600 !important;
+    }
+    /* Secondary text (captions) — 12-14px */
+    .stCaption, [data-testid="stCaptionContainer"], small {
+        font-size: 13px !important;
+        line-height: 1.5 !important;
+    }
+    /* Input fields — 16px minimum prevents mobile zoom */
+    .stTextInput input, .stNumberInput input,
+    .stSelectbox [data-baseweb="select"] *, .stMultiSelect [data-baseweb="select"] * {
+        font-size: 16px !important;
     }
     .stButton > button {
         background-color: #E8A020 !important;
         color: white !important;
         border-radius: 6px;
         border: none;
-        font-weight: 600;
-        padding: 0.5em 1.2em;
+        font-weight: 700;
+        font-size: 16px;
+        min-height: 44px;
+        padding: 0.6em 1.2em;
         transition: all 0.15s ease;
     }
     .stButton > button:hover {
@@ -39,21 +73,23 @@ st.markdown("""
         transform: translateY(-1px);
     }
     .price-tag { color: #E8A020; font-weight: 800; font-size: 1.15em; }
-    .hero-brand {
-        font-size: 5em;
-        font-weight: 900;
+    .stMarkdown p.hero-brand {
+        font-size: clamp(3em, 14vw, 6em) !important;
+        font-weight: 900 !important;
         color: #1B2F6E;
         letter-spacing: -3px;
-        line-height: 1;
+        line-height: 1 !important;
+        text-align: center;
     }
-    .hero-tagline {
-        font-size: 1.1em;
-        font-weight: 700;
+    .stMarkdown p.hero-tagline {
+        font-size: clamp(1em, 3vw, 1.3em) !important;
+        font-weight: 700 !important;
         color: #E8A020;
         letter-spacing: 1px;
         text-transform: uppercase;
-        margin-top: -8px;
+        margin-top: -4px;
         margin-bottom: 12px;
+        text-align: center;
     }
     .value-prop {
         background: white;
@@ -599,6 +635,47 @@ def parse_price(price_str):
     return float(nums[0]) if nums else float('inf')
 
 
+_TWO_WORD_BRANDS = [
+    "new balance", "under armour", "la sportiva", "on running", "the north face",
+    "five ten", "black diamond", "top sider", "air jordan", "cross country",
+]
+
+
+def extract_brand(title):
+    """Best-effort brand key from a product title, for diversity checks."""
+    if not title:
+        return ""
+    t = title.strip().lower()
+    for b in _TWO_WORD_BRANDS:
+        if t.startswith(b):
+            return b
+    words = t.split(" ")
+    return words[0] if words else ""
+
+
+def pick_diverse(products, start, count):
+    """Pick `count` products starting at `start` (wrapping), preferring distinct brands
+    so the displayed tiers aren't 3 of the same brand."""
+    n = len(products)
+    chosen = []
+    seen_brands = set()
+    for i in range(n):
+        p = products[(start + i) % n]
+        brand = extract_brand(p.get('title'))
+        if brand not in seen_brands:
+            chosen.append(p)
+            seen_brands.add(brand)
+            if len(chosen) == count:
+                return chosen
+    for i in range(n):
+        p = products[(start + i) % n]
+        if p not in chosen:
+            chosen.append(p)
+            if len(chosen) == count:
+                break
+    return chosen
+
+
 def render_product_tiers(products, act, cat_key):
     """Show 3 products (budget / best value / premium) with a More Choices button."""
     if not products:
@@ -618,7 +695,9 @@ def render_product_tiers(products, act, cat_key):
         st.session_state[offset_key] = 0
 
     offset = st.session_state[offset_key] % n
-    display = [sorted_products[(offset + i) % n] for i in range(min(3, n))]
+    display = pick_diverse(sorted_products, offset, min(3, n))
+
+    st.caption("_When you find your shoe, more color options are likely available — click through to see all styles._")
 
     tier_labels = ["💰 Budget Pick", "⚖️ Best Value", "🔥 Premium"]
     cols = st.columns(len(display))
@@ -639,8 +718,6 @@ def render_product_tiers(products, act, cat_key):
                 buy_link = product.get("link") or product.get("product_link")
                 if buy_link:
                     st.link_button("View & Buy →", buy_link)
-
-    st.caption("_When you find your shoe, more color options are likely available — click through to see all styles._")
 
     if n > 3:
         if st.button("🔄 Get More Choices", key=f"more_{act}_{cat_key}"):
@@ -723,11 +800,12 @@ if 1 <= st.session_state.step <= 5:
 # STEP 0: LANDING / LOGIN
 # ==========================================
 if st.session_state.step == 0:
+    st.markdown('<p class="hero-brand">👟 FITFXR</p>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-tagline">— The Right Fit Changes Everything —</p>', unsafe_allow_html=True)
+
     col_hero, col_auth = st.columns([3, 2], gap="large")
 
     with col_hero:
-        st.markdown('<p class="hero-brand">FITFXR</p>', unsafe_allow_html=True)
-        st.markdown('<p class="hero-tagline">— The Right Fit Changes Everything —</p>', unsafe_allow_html=True)
         st.markdown(
             '<div class="mission-bar">'
             'Welcome to FITFXR — your custom, research-driven fitting consultant. '
@@ -933,11 +1011,14 @@ elif st.session_state.step == 2:
         st.session_state.user_data['arch'] = st.selectbox(
             "Arch Type", ["--- Select ---", "I don't know", "Neutral", "High Arch", "Flat / Low Arch"]
         )
-        st.session_state.user_data['injuries'] = st.multiselect(
+        if "injuries_multiselect" not in st.session_state:
+            st.session_state["injuries_multiselect"] = st.session_state.user_data.get('injuries', [])
+        st.multiselect(
             "Current Injuries / Concerns (select all that apply)",
             injury_options,
-            default=st.session_state.user_data.get('injuries', [])
+            key="injuries_multiselect",
         )
+        st.session_state.user_data['injuries'] = st.session_state["injuries_multiselect"]
 
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -1063,13 +1144,16 @@ elif st.session_state.step == 4:
             ["Doesn't matter", "Nice to have", "Required for most activities"]
         )
     with col_w2:
-        st.session_state.user_data['priorities'] = st.multiselect(
+        if "priorities_multiselect" not in st.session_state:
+            st.session_state["priorities_multiselect"] = st.session_state.user_data.get('priorities', [])
+        st.multiselect(
             "What matters most to you? (pick up to 3)",
             ["Comfort", "Price / Value", "Durability", "Style / Look",
              "Brand Name", "Lightweight", "Support / Stability", "Breathability", "Sustainability"],
-            default=st.session_state.user_data.get('priorities', []),
+            key="priorities_multiselect",
             max_selections=3,
         )
+        st.session_state.user_data['priorities'] = st.session_state["priorities_multiselect"]
 
     c1, c2 = st.columns([1, 2])
     with c1:
