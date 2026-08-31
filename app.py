@@ -51,8 +51,13 @@ st.markdown("""
     h2, .stMarkdown h2 { font-size: clamp(22px, 5vw, 32px) !important; }
     h3, .stMarkdown h3 { font-size: clamp(19px, 4vw, 26px) !important; }
 
-    /* Body copy, labels, widget text — 16-18px minimum, bolder for scanability */
-    .stMarkdown p, .stMarkdown li,
+    /* Body copy — 16-18px minimum, readable weight without feeling shouty */
+    .stMarkdown p, .stMarkdown li {
+        font-size: 16px !important;
+        line-height: 1.5 !important;
+        font-weight: 500 !important;
+    }
+    /* Labels & choices — bold for fast scanning while moving through the flow */
     label, div[data-testid="stWidgetLabel"] p,
     .stCheckbox label p, .stRadio label p {
         font-size: 16px !important;
@@ -72,13 +77,13 @@ st.markdown("""
     .stButton > button {
         background-color: #E8A020 !important;
         color: white !important;
-        border-radius: 6px;
+        border-radius: 8px;
         border: none;
         font-weight: 700;
         font-size: 16px;
         min-height: 44px;
-        padding: 0.6em 1.2em;
-        transition: all 0.15s ease;
+        padding: 0.55em 1.2em;
+        transition: all 0.1s ease;
     }
     .stButton > button:hover {
         background-color: #D4911A !important;
@@ -90,27 +95,34 @@ st.markdown("""
         background: white;
         border-left: 4px solid #1B2F6E;
         border-radius: 6px;
-        padding: 14px 18px;
-        margin-bottom: 10px;
+        padding: 10px 16px;
+        margin-bottom: 6px;
         font-size: 0.97em;
     }
     .founding-badge {
         background: linear-gradient(135deg, #1B2F6E, #2a4494);
         color: white;
         border-radius: 10px;
-        padding: 16px 20px;
-        margin-top: 20px;
+        padding: 14px 18px;
+        margin-top: 14px;
     }
     .mission-bar {
         background: #1B2F6E;
         color: white;
         border-radius: 8px;
-        padding: 14px 20px;
-        margin-bottom: 16px;
+        padding: 12px 18px;
+        margin-bottom: 12px;
         font-size: 0.98em;
         line-height: 1.5;
     }
     div[data-testid="stTabs"] button { font-weight: 600; }
+
+    /* Tighter, lighter cards throughout the flow — less boxy, feels quicker to scan */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 10px !important;
+        border-color: #E3E6F0 !important;
+    }
+    hr { margin: 0.6rem 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
