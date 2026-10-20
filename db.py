@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+import time
 from supabase import create_client, Client
 
 
@@ -24,6 +25,90 @@ def get_service_client() -> Client:
     url = _get_secret("SUPABASE_URL")
     key = _get_secret("SUPABASE_SERVICE_KEY") or _get_secret("SUPABASE_KEY")
     return create_client(url, key)
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+# Retry transient network failures, and turn Supabase/httpx errors into messages a
+# user can act on. The raw error is logged (Render logs), never shown.
+
+_NETWORK_HINTS = (
+    "nodename nor servname", "name or service not known", "temporary failure in name resolution",
+    "getaddrinfo", "connection refused", "connection reset", "connecterror", "timed out",
+    "timeout", "network is unreachable", "remoteprotocolerror", "server disconnected",
+    "502", "503", "504",
+)
+
+
+def _is_network_error(e: Exception) -> bool:
+    try:
+        import httpx
+        if isinstance(e, (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)):
+            return True
+    except ImportError:
+        pass
+    msg = f"{type(e).__name__} {e}".lower()
+    return any(h in msg for h in _NETWORK_HINTS)
+
+
+def auth_call(fn, retries: int = 2):
+    """Run fn(auth) against a fresh Supabase auth client, retrying network failures with backoff."""
+    for attempt in range(retries + 1):
+        try:
+            return fn(get_client().auth)
+        except Exception as e:
+            if _is_network_error(e) and attempt < retries:
+                time.sleep(0.75 * (attempt + 1))
+                continue
+            raise
+
+
+def friendly_auth_error(e: Exception, action: str) -> str:
+    """Map an auth exception to a user-facing message. action: 'sign_up' | 'log_in'."""
+    msg = str(e).lower()
+    print(f"[FITFXR AUTH] {action} failed: {type(e).__name__}: {e}", flush=True)
+    if _is_network_error(e):
+        return ("We can't reach our account service right now. Please try again in a minute, "
+                "or browse without an account. Your results still work.")
+    if "rate limit" in msg or "429" in msg or "too many" in msg:
+        return "Too many attempts right now. Please wait a minute and try again."
+    if "already registered" in msg or "already exists" in msg:
+        return "An account with this email already exists. Try logging in."
+    if "email not confirmed" in msg:
+        return "Please confirm your email first. Check your inbox (and spam)."
+    if "invalid login credentials" in msg or "invalid credentials" in msg:
+        return "Invalid email or password. Please try again."
+    if "password" in msg and ("weak" in msg or "at least" in msg or "should be" in msg):
+        return "That password is too weak. Use at least 8 characters, including a number."
+    if "email" in msg and ("invalid" in msg or "valid email" in msg):
+        return "That email address doesn't look right. Please check it."
+    if "signups not allowed" in msg or "signup is disabled" in msg:
+        return "New sign-ups are paused right now. Please browse without an account for the moment."
+    return ("Something went wrong creating your account. Please try again."
+            if action == "sign_up" else "Something went wrong logging in. Please try again.")
+
+
+def auth_health(timeout: float = 3.0) -> tuple[bool, str]:
+    """(ok, reason) for the Supabase auth service — DNS first (catches a paused/deleted project),
+    then the /auth/v1/health endpoint."""
+    import socket
+    from urllib.parse import urlparse
+    url = (_get_secret("SUPABASE_URL") or "").strip()
+    host = urlparse(url).hostname
+    if not host:
+        return False, "SUPABASE_URL is missing or malformed"
+    try:
+        socket.getaddrinfo(host, 443)
+    except OSError:
+        return False, f"{host} does not resolve — Supabase project paused or deleted?"
+    try:
+        import httpx
+        r = httpx.get(f"{url.rstrip('/')}/auth/v1/health",
+                      headers={"apikey": _get_secret("SUPABASE_KEY")}, timeout=timeout)
+        if r.status_code >= 500:
+            return False, f"auth health returned HTTP {r.status_code}"
+        return True, "ok"
+    except Exception as e:
+        return False, f"auth health check failed: {e}"
 
 
 def save_session(user_data: dict, ai_results: dict,

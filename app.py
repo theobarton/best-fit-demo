@@ -1,10 +1,8 @@
 import streamlit as st
 import os
-import json
 import re
 from dotenv import load_dotenv
-from openai import OpenAI
-from serpapi import GoogleSearch
+from recommender import DEFAULT_ENGINE, ENGINES, is_trusted, recommend, serpapi_credits_left
 
 load_dotenv()
 
@@ -38,6 +36,24 @@ for _k in _REQUIRED_KEYS:
     _v = get_secret(_k)
     _status = f"OK (len={len(_v)})" if _v else "MISSING OR EMPTY"
     print(f"[FITFXR KEY CHECK] {_k}: {_status}", file=sys.stderr, flush=True)
+
+from db import auth_health  # noqa: E402
+
+_ok, _why = auth_health()
+print(f"[FITFXR AUTH CHECK] {'OK' if _ok else 'DOWN — ' + _why}", file=sys.stderr, flush=True)
+_credits = serpapi_credits_left(get_secret("SERPAPI_KEY"))
+print(f"[FITFXR SEARCH CHECK] SerpAPI searches left: {_credits}"
+      + ("  ⚠️ LOW — each results page uses ~12–18" if isinstance(_credits, int) and _credits < 100 else ""),
+      file=sys.stderr, flush=True)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _auth_status():
+    """Supabase auth reachability, re-checked at most once a minute."""
+    ok, why = auth_health()
+    if not ok:
+        print(f"[FITFXR AUTH CHECK] DOWN — {why}", file=sys.stderr, flush=True)
+    return ok, why
 
 st.markdown("""
 <style>
@@ -652,7 +668,7 @@ def extract_brand(title):
     """Best-effort brand key from a product title, for diversity checks."""
     if not title:
         return ""
-    t = title.strip().lower()
+    t = re.sub(r"^((wo)?men'?s|unisex|adults?'?)\s+", "", title.strip().lower())
     for b in _TWO_WORD_BRANDS:
         if t.startswith(b):
             return b
@@ -686,8 +702,24 @@ def pick_diverse(products, start, count):
 def render_product_tiers(products, act, cat_key):
     """Show 3 products (budget / best value / premium) with a More Choices button."""
     if not products:
-        st.info("No products found for this category.")
+        st.info("No strong matches found for this category — try Refine My Search.")
         return
+
+    # Fit-scored engines (v1–v3): tier only among the strongest fits, so Budget/Value/Premium
+    # are three good fits at different prices — not the cheapest and priciest random listings.
+    scored = [p for p in products if p.get("fit_score") is not None]
+    if scored:
+        best = max(p["fit_score"] for p in scored)
+        pool = [p for p in scored if p["fit_score"] >= best - 15]
+        if len(pool) < 3:
+            pool = sorted(scored, key=lambda p: -p["fit_score"])[:3]
+        products = pool
+
+    # Prefer allowlisted retailers when there are enough of them — the cheapest unknown
+    # seller of a current model is too often a counterfeit.
+    trusted = [p for p in products if is_trusted(p)]
+    if len(trusted) >= 3:
+        products = trusted
 
     priced = sorted(
         [p for p in products if parse_price(p.get('price')) < float('inf')],
@@ -720,6 +752,10 @@ def render_product_tiers(products, act, cat_key):
                     unsafe_allow_html=True
                 )
                 st.caption(f"From: {product.get('source', 'N/A')}")
+                if product.get("fit_score") is not None:
+                    st.caption(f"🎯 **{product['fit_score']}% fit**")
+                if product.get("why"):
+                    st.caption(f"_{product['why']}_")
                 if product.get("rating"):
                     st.caption(f"⭐ {product['rating']}  ({product.get('reviews', 0)} reviews)")
                 buy_link = product.get("link") or product.get("product_link")
@@ -757,6 +793,20 @@ def prev_step(): st.session_state.step -= 1
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## FITFXR")
+
+    # Recommendation engine — default from FITFXR_ENGINE, overridable with ?engine=v2 in the URL.
+    # The picker shows with FITFXR_DEV=1 or ?dev=1 so you can A/B engines on the same profile.
+    if "engine" not in st.session_state:
+        _qe = st.query_params.get("engine", "")
+        st.session_state.engine = _qe if _qe in ENGINES else (get_secret("FITFXR_ENGINE") or DEFAULT_ENGINE)
+    if get_secret("FITFXR_DEV") == "1" or st.query_params.get("dev") == "1":
+        _keys = list(ENGINES)
+        _picked = st.selectbox("🧪 Engine", _keys, index=_keys.index(st.session_state.engine),
+                               format_func=ENGINES.get, key="engine_picker")
+        if _picked != st.session_state.engine:
+            st.session_state.engine = _picked
+            st.session_state.ai_results = None  # re-run results with the new engine
+            st.rerun()
     if st.session_state.step > 0:
         if st.session_state.logged_in:
             _dname = st.session_state.username.split("@")[0] if "@" in st.session_state.username else st.session_state.username
@@ -838,6 +888,10 @@ if st.session_state.step == 0:
 
     with col_auth:
         st.markdown("### Get Started")
+        _auth_ok, _ = _auth_status()
+        if not _auth_ok:
+            st.warning("Accounts are temporarily unavailable. You can still browse without an account "
+                       "and get full recommendations.")
         tab_signup, tab_login = st.tabs(["Create Account", "Log In"])
 
         with tab_signup:
@@ -850,23 +904,20 @@ if st.session_state.step == 0:
                     st.error("Password must be at least 6 characters.")
                 else:
                     try:
-                        from db import get_client as _sb
-                        resp = _sb().auth.sign_up({"email": su_email, "password": su_pw})
+                        from db import auth_call
+                        resp = auth_call(lambda auth: auth.sign_up({"email": su_email.strip(), "password": su_pw}))
                         if resp.session:
                             st.session_state.logged_in = True
                             st.session_state.username = su_email
                             next_step()
                             st.rerun()
                         elif resp.user:
-                            st.success("Account created! Check your email to confirm, then log in.")
+                            st.success("Account created! Check your email (and spam) to confirm, then log in.")
                         else:
-                            st.error("Sign up failed. Please try again.")
+                            st.error("Something went wrong creating your account. Please try again.")
                     except Exception as e:
-                        msg = str(e).lower()
-                        if "already registered" in msg or "already exists" in msg:
-                            st.error("An account with this email already exists. Try logging in.")
-                        else:
-                            st.error(f"Sign up failed: {e}")
+                        from db import friendly_auth_error
+                        st.error(friendly_auth_error(e, "sign_up"))
             st.caption("No credit card. No spam. Ever.")
             st.divider()
             st.button("🔐 Continue with Google", use_container_width=True, disabled=True,
@@ -880,8 +931,9 @@ if st.session_state.step == 0:
                     st.error("Please enter your email and password.")
                 else:
                     try:
-                        from db import get_client as _sb, load_user_profile
-                        resp = _sb().auth.sign_in_with_password({"email": li_email, "password": li_pw})
+                        from db import auth_call, load_user_profile
+                        resp = auth_call(lambda auth: auth.sign_in_with_password(
+                            {"email": li_email.strip(), "password": li_pw}))
                         st.session_state.logged_in = True
                         st.session_state.username = li_email
                         profile = load_user_profile(li_email)
@@ -892,11 +944,8 @@ if st.session_state.step == 0:
                             next_step()
                         st.rerun()
                     except Exception as e:
-                        msg = str(e).lower()
-                        if "email not confirmed" in msg:
-                            st.error("Please confirm your email first — check your inbox.")
-                        else:
-                            st.error("Invalid email or password. Please try again.")
+                        from db import friendly_auth_error
+                        st.error(friendly_auth_error(e, "log_in"))
             st.divider()
             st.button("🔐 Continue with Google", use_container_width=True, disabled=True,
                       help="Google Sign-In coming soon.", key="google_btn_login")
@@ -1183,217 +1232,19 @@ elif st.session_state.step == 5:
         api_key = get_secret("OPENAI_API_KEY")
         serpapi_key = get_secret("SERPAPI_KEY")
 
-        # Injury-aware constraint notes
-        injury_notes = []
-        injuries = u.get('injuries', [])
-        if "Overpronation / Collapsed Arches" in injuries or "Flat Feet" in injuries:
-            injury_notes.append("CRITICAL: all queries MUST include 'motion control' or 'stability'. No neutral shoes.")
-        if "Plantar Fasciitis" in injuries or "Heel Spurs" in injuries:
-            injury_notes.append("Prioritize max cushion and arch support in every query.")
-        if "Knee Pain (Runner's Knee / PFPS)" in injuries or "IT Band Syndrome" in injuries:
-            injury_notes.append("Prioritize shock absorption and cushioning.")
-        if "High Arches" in injuries or "Supination / Underpronation" in injuries:
-            injury_notes.append("Neutral or cushioned shoes only. No motion control.")
-        if "Achilles Tendonitis" in injuries:
-            injury_notes.append("Prioritize lower heel drop (4–8mm) and cushioning.")
-        if "Bunions" in injuries or "Morton's Neuroma" in injuries:
-            injury_notes.append("All queries require wide toe box.")
-        if "Ankle Instability / Chronic Sprains" in injuries or "Weak Ankles (general)" in injuries:
-            injury_notes.append("Prioritize high-top or ankle-support designs.")
+        # Primary (regular) activities get recommendations; occasional ones are skipped.
+        activity_answers = {
+            act: collect_activity_answers(act)
+            for act in u['selected_activities']
+            if not st.session_state.get(f"{act}__occasional", False)
+        }
 
-        width_note = ""
-        if u.get('width') in ["Wide (2E)", "Extra Wide (4E+)"]:
-            width_note = "Wide feet — include 'wide' or '2E'/'4E' in all queries."
-
-        waterproof_note = ""
-        if u.get('waterproof') == "Required for most activities":
-            waterproof_note = "Waterproofing required — include 'waterproof' or 'Gore-Tex' in all queries."
-
-        # Separate primary (regular) and occasional activities
-        primary_activities = []
-        occasional_activities = []
-        activity_details = {}
-        for act in u['selected_activities']:
-            occasional = st.session_state.get(f"{act}__occasional", False)
-            if occasional:
-                note = st.session_state.get(f"{act}__occasional_note", "")
-                occasional_activities.append(act)
-                activity_details[act] = f"occasional — {note}" if note else "occasional"
-            else:
-                primary_activities.append(act)
-                answers = collect_activity_answers(act)
-                if answers:
-                    activity_details[act] = "; ".join(f"{k}: {v}" for k, v in answers.items())
-                else:
-                    activity_details[act] = ""
-
-        # Build shared context for all queries
-        shared_context = "\n".join(filter(None, [
-            f"User: Age {u['age']}, {u['sex']}, {u['weight']}, {u['height']}.",
-            f"Shoe size: {u['shoe_size']}, Width: {u['width']}, Arch: {u['arch']}.",
-            f"Injuries/Concerns: {', '.join(injuries) or 'None'}.",
-            f"Waterproof need: {u.get('waterproof', 'N/A')}.",
-            f"Priorities: {', '.join(u['priorities']) if u['priorities'] else 'None'}.",
-            width_note,
-            waterproof_note,
-            *injury_notes,
-        ]))
-
-        # Build per-activity detail lines for the prompt
-        activity_lines = []
-        for act in primary_activities:
-            detail = activity_details.get(act, "")
-            activity_lines.append(f'  "{act}": details — {detail}' if detail else f'  "{act}"')
-
-        activities_block = "\n".join(activity_lines)
-
-        system_prompt = (
-            "You are FITFXR, an expert footwear and outdoor gear AI.\n"
-            "For each PRIMARY activity, generate exactly 3 Google Shopping search queries covering different product categories:\n"
-            "  1. Primary footwear (shoes/boots/skates/cleats — the most important)\n"
-            "  2. A closely related gear item (insoles, socks, bindings, pedals, etc.)\n"
-            "  3. A second gear or apparel item that pairs well with the activity\n\n"
-            "Return valid JSON only. Structure:\n"
-            '{"Road Running": {"footwear": "Brooks Ghost 16 men stability running shoe", '
-            '"gear_1": "Superfeet GREEN insoles arch support", '
-            '"gear_2": "Balega Hidden Comfort running socks men"}, '
-            '"Downhill Skiing": {"footwear": "Salomon S/Pro 120 ski boot men", '
-            '"gear_1": "Superfeet Yellow ski boot insoles", '
-            '"gear_2": "Smartwool ski socks men medium cushion"}}\n\n'
-            "Rules:\n"
-            "- Name a specific real brand and model in EVERY query\n"
-            "- Footwear must match the activity exactly (boots/cleats/skates/shoes — never generic)\n"
-            "- ALWAYS include the user's sex in footwear queries: 'women's' for Woman, 'men's' for Man\n"
-            "- ALWAYS apply arch type to footwear queries (e.g. 'high arch support', 'neutral arch')\n"
-            "- Apply ALL injury, width, and waterproof requirements to the footwear query\n"
-            "- gear_1 and gear_2 must be distinct product types (not two shoe queries)\n"
-            "- Every query must find a buyable product on Google Shopping\n"
-            "- Return ONLY the JSON object — no markdown, no explanation"
-        )
-
-        user_message = (
-            f"{shared_context}\n\n"
-            f"PRIMARY activities to generate queries for:\n{activities_block}"
-        )
-
-        with st.spinner("Be patient — just taking the time to get your fit right..."):
+        with st.spinner("Be patient — scanning stores and checking every option against your fit..."):
             try:
-                client = OpenAI(api_key=api_key)
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    response_format={"type": "json_object"}
-                )
-                queries = json.loads(response.choices[0].message.content)
+                results = recommend(st.session_state.engine, u, activity_answers, api_key, serpapi_key)
             except Exception as e:
                 st.error(f"AI Error: {e}")
                 st.stop()
-
-        # Activity-specific fallback search terms (used when AI query returns no results)
-        ACTIVITY_FALLBACK_TERMS = {
-            "Road Running": "men's road running shoes",
-            "Trail Running": "trail running shoes",
-            "Ultramarathon": "ultra marathon trail running shoes",
-            "Cross Country Running": "cross country running shoes",
-            "Race Walking": "race walking shoes",
-            "Treadmill Running": "treadmill running shoes",
-            "Walking / Casual": "walking shoes",
-            "Day Hiking": "day hiking boots",
-            "Backpacking": "backpacking boots",
-            "Mountaineering / Alpine": "mountaineering boots",
-            "Rock Climbing": "rock climbing shoes",
-            "Water Sports / Kayaking": "water shoes kayaking",
-            "Hunting / Fishing": "hunting boots",
-            "Cycling / Mountain Biking": "mountain bike shoes SPD",
-            "Basketball": "basketball shoes",
-            "Tennis": "tennis shoes",
-            "Pickleball": "pickleball shoes",
-            "Volleyball": "volleyball shoes",
-            "Squash / Racquetball": "squash court shoes",
-            "Badminton": "badminton shoes",
-            "Soccer": "soccer cleats",
-            "Football (Cleats)": "football cleats",
-            "Baseball / Softball": "baseball cleats",
-            "Lacrosse": "lacrosse cleats",
-            "Rugby": "rugby boots",
-            "Ultimate Frisbee": "cleats ultimate frisbee",
-            "Field Hockey": "field hockey turf shoes",
-            "Weightlifting / CrossFit": "weightlifting shoes",
-            "HIIT Training": "cross training shoes",
-            "Yoga / Pilates": "yoga grip socks",
-            "Dance / Zumba": "dance aerobics shoes",
-            "Spin / Indoor Cycling": "indoor cycling shoes SPD",
-            "Rowing / Erg": "rowing training shoes",
-            "Downhill Skiing": "downhill ski boots",
-            "Cross-Country Skiing": "cross country ski boots",
-            "Snowboarding": "snowboard boots",
-            "Ice Skating": "ice skates",
-            "Snowshoeing": "winter hiking boots waterproof",
-            "Skateboarding": "skate shoes vulcanized",
-            "Golf": "golf shoes spikeless",
-            "Work / Standing All Day": "work shoes slip resistant",
-            "Casual / Streetwear": "casual sneakers",
-            "Travel / Light Hiking": "travel walking shoes",
-            "Cowboy / Western": "western boots",
-        }
-
-        def serpapi_search(query):
-            s = GoogleSearch({
-                "engine": "google_shopping",
-                "q": query,
-                "api_key": serpapi_key,
-                "num": 10,
-                "gl": "us",
-                "hl": "en",
-            })
-            return s.get_dict().get("shopping_results", [])[:10]
-
-        # Build a case-insensitive lookup for AI queries in case keys don't match exactly
-        queries_lower = {k.lower(): v for k, v in queries.items()}
-
-        # Category labels shown as section headers in results
-        CATEGORY_LABELS = {
-            "footwear": "👟 Footwear",
-            "gear_1":   "🎒 Gear & Accessories",
-            "gear_2":   "⚡ Also Recommended",
-        }
-
-        def search_with_fallback(ai_query, fallback_query):
-            """Try AI query, fall back to generic if no results."""
-            if ai_query:
-                products = serpapi_search(ai_query)
-                if products:
-                    return ai_query, products
-            products = serpapi_search(fallback_query)
-            return fallback_query, products
-
-        results = {}
-        with st.spinner("Searching live stores — your perfect fit is worth the wait..."):
-            for act in primary_activities:
-                ai_act = queries.get(act) or queries_lower.get(act.lower()) or {}
-                # Support both old flat string format and new dict format from AI
-                if isinstance(ai_act, str):
-                    ai_act = {"footwear": ai_act}
-                generic_footwear = ACTIVITY_FALLBACK_TERMS.get(act, f"{act} shoes")
-                categories = {}
-                try:
-                    for cat_key, cat_label in CATEGORY_LABELS.items():
-                        ai_query = ai_act.get(cat_key, "")
-                        fallback = generic_footwear if cat_key == "footwear" else ""
-                        if not ai_query and not fallback:
-                            continue
-                        used_q, products = search_with_fallback(ai_query, fallback or ai_query)
-                        categories[cat_key] = {
-                            "label": cat_label,
-                            "query": used_q,
-                            "products": products,
-                        }
-                    results[act] = {"categories": categories}
-                except Exception as e:
-                    results[act] = {"categories": {}, "error": str(e)}
 
         st.session_state.ai_results = results
 
@@ -1486,7 +1337,12 @@ elif st.session_state.step == 5:
                 for cat_key, cat_data in categories.items():
                     st.subheader(cat_data["label"])
                     st.caption(f"Searched: *{cat_data['query']}*")
-                    render_product_tiers(cat_data.get("products", []), selected_act, cat_key)
+                    if not cat_data.get("products") and cat_data.get("search_down"):
+                        st.warning(cat_data["note"])
+                    elif not cat_data.get("products") and cat_data.get("note"):
+                        st.info(cat_data["note"])
+                    else:
+                        render_product_tiers(cat_data.get("products", []), selected_act, cat_key)
                     st.divider()
 
     st.divider()

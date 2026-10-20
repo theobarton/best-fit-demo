@@ -1,0 +1,389 @@
+{
+ "_note": "Retailer allowlist. 'groups' drive targeted site: sweeps per activity; every name is also used to rank/trust Google Shopping sources.",
+ "groups": {
+  "run": [
+   {
+    "domain": "runningwarehouse.com",
+    "name": "Running Warehouse"
+   },
+   {
+    "domain": "roadrunnersports.com",
+    "name": "Road Runner Sports"
+   },
+   {
+    "domain": "fleetfeet.com",
+    "name": "Fleet Feet"
+   },
+   {
+    "domain": "jackrabbit.com",
+    "name": "JackRabbit"
+   },
+   {
+    "domain": "holabirdsports.com",
+    "name": "Holabird Sports"
+   },
+   {
+    "domain": "marathonsports.com",
+    "name": "Marathon Sports"
+   },
+   {
+    "domain": "runnersneed.com",
+    "name": "Runners Need"
+   },
+   {
+    "domain": "brooksrunning.com",
+    "name": "Brooks Running"
+   },
+   {
+    "domain": "hoka.com",
+    "name": "HOKA"
+   },
+   {
+    "domain": "saucony.com",
+    "name": "Saucony"
+   },
+   {
+    "domain": "asics.com",
+    "name": "ASICS"
+   },
+   {
+    "domain": "altrarunning.com",
+    "name": "Altra"
+   },
+   {
+    "domain": "on.com",
+    "name": "On"
+   },
+   {
+    "domain": "newbalance.com",
+    "name": "New Balance"
+   }
+  ],
+  "outdoor": [
+   {
+    "domain": "rei.com",
+    "name": "REI"
+   },
+   {
+    "domain": "backcountry.com",
+    "name": "Backcountry"
+   },
+   {
+    "domain": "moosejaw.com",
+    "name": "Moosejaw"
+   },
+   {
+    "domain": "campsaver.com",
+    "name": "CampSaver"
+   },
+   {
+    "domain": "steepandcheap.com",
+    "name": "Steep & Cheap"
+   },
+   {
+    "domain": "sierra.com",
+    "name": "Sierra"
+   },
+   {
+    "domain": "basspro.com",
+    "name": "Bass Pro Shops"
+   },
+   {
+    "domain": "cabelas.com",
+    "name": "Cabela's"
+   },
+   {
+    "domain": "sportsmans.com",
+    "name": "Sportsman's Warehouse"
+   },
+   {
+    "domain": "mountaingear.com",
+    "name": "Mountain Gear"
+   },
+   {
+    "domain": "outdoorgearexchange.com",
+    "name": "Outdoor Gear Exchange"
+   },
+   {
+    "domain": "gearx.com",
+    "name": "GearX"
+   },
+   {
+    "domain": "eddiebauer.com",
+    "name": "Eddie Bauer"
+   },
+   {
+    "domain": "llbean.com",
+    "name": "L.L.Bean"
+   },
+   {
+    "domain": "merrell.com",
+    "name": "Merrell"
+   },
+   {
+    "domain": "salomon.com",
+    "name": "Salomon"
+   },
+   {
+    "domain": "keenfootwear.com",
+    "name": "KEEN"
+   },
+   {
+    "domain": "lasportiva.com",
+    "name": "La Sportiva"
+   },
+   {
+    "domain": "thenorthface.com",
+    "name": "The North Face"
+   },
+   {
+    "domain": "columbia.com",
+    "name": "Columbia"
+   },
+   {
+    "domain": "oboz.com",
+    "name": "Oboz"
+   },
+   {
+    "domain": "lowaboots.com",
+    "name": "LOWA"
+   },
+   {
+    "domain": "scheels.com",
+    "name": "SCHEELS"
+   },
+   {
+    "domain": "evo.com",
+    "name": "evo"
+   },
+   {
+    "domain": "christysports.com",
+    "name": "Christy Sports"
+   }
+  ],
+  "court": [
+   {
+    "domain": "tennis-warehouse.com",
+    "name": "Tennis Warehouse"
+   },
+   {
+    "domain": "tennisexpress.com",
+    "name": "Tennis Express"
+   },
+   {
+    "domain": "midwestsports.com",
+    "name": "Midwest Sports"
+   },
+   {
+    "domain": "pickleballcentral.com",
+    "name": "Pickleball Central"
+   },
+   {
+    "domain": "holabirdsports.com",
+    "name": "Holabird Sports"
+   },
+   {
+    "domain": "eastbay.com",
+    "name": "Eastbay"
+   },
+   {
+    "domain": "footlocker.com",
+    "name": "Foot Locker"
+   },
+   {
+    "domain": "champssports.com",
+    "name": "Champs Sports"
+   }
+  ],
+  "team": [
+   {
+    "domain": "soccer.com",
+    "name": "SOCCER.COM"
+   },
+   {
+    "domain": "justballgloves.com",
+    "name": "JustBallGloves"
+   },
+   {
+    "domain": "baseballmonkey.com",
+    "name": "Baseball Monkey"
+   },
+   {
+    "domain": "lacrossemonkey.com",
+    "name": "Lacrosse Monkey"
+   },
+   {
+    "domain": "footlocker.com",
+    "name": "Foot Locker"
+   },
+   {
+    "domain": "eastbay.com",
+    "name": "Eastbay"
+   },
+   {
+    "domain": "hibbett.com",
+    "name": "Hibbett"
+   },
+   {
+    "domain": "academy.com",
+    "name": "Academy Sports"
+   }
+  ],
+  "work": [
+   {
+    "domain": "workbootsusa.com",
+    "name": "Work Boots USA"
+   },
+   {
+    "domain": "bootbarn.com",
+    "name": "Boot Barn"
+   },
+   {
+    "domain": "shoesforcrews.com",
+    "name": "Shoes For Crews"
+   },
+   {
+    "domain": "thinkworkshoes.com",
+    "name": "Work Shoes"
+   },
+   {
+    "domain": "redwingshoes.com",
+    "name": "Red Wing"
+   },
+   {
+    "domain": "danskoshoes.com",
+    "name": "Dansko"
+   },
+   {
+    "domain": "footsmart.com",
+    "name": "FootSmart"
+   },
+   {
+    "domain": "drcomfort.com",
+    "name": "Dr. Comfort"
+   }
+  ],
+  "general": [
+   {
+    "domain": "zappos.com",
+    "name": "Zappos"
+   },
+   {
+    "domain": "dickssportinggoods.com",
+    "name": "DICK'S"
+   },
+   {
+    "domain": "nordstrom.com",
+    "name": "Nordstrom"
+   },
+   {
+    "domain": "dsw.com",
+    "name": "DSW"
+   },
+   {
+    "domain": "famousfootwear.com",
+    "name": "Famous Footwear"
+   },
+   {
+    "domain": "shoes.com",
+    "name": "Shoes.com"
+   },
+   {
+    "domain": "6pm.com",
+    "name": "6pm"
+   },
+   {
+    "domain": "academy.com",
+    "name": "Academy Sports"
+   },
+   {
+    "domain": "scheels.com",
+    "name": "SCHEELS"
+   },
+   {
+    "domain": "kohls.com",
+    "name": "Kohl's"
+   },
+   {
+    "domain": "macys.com",
+    "name": "Macy's"
+   },
+   {
+    "domain": "onlineshoes.com",
+    "name": "OnlineShoes"
+   },
+   {
+    "domain": "shoebacca.com",
+    "name": "Shoebacca"
+   },
+   {
+    "domain": "nike.com",
+    "name": "Nike"
+   },
+   {
+    "domain": "adidas.com",
+    "name": "adidas"
+   },
+   {
+    "domain": "amazon.com",
+    "name": "Amazon"
+   },
+   {
+    "domain": "target.com",
+    "name": "Target"
+   },
+   {
+    "domain": "walmart.com",
+    "name": "Walmart"
+   }
+  ]
+ },
+ "activity_groups": {
+  "run": [
+   "Road Running",
+   "Trail Running",
+   "Ultramarathon",
+   "Cross Country Running",
+   "Race Walking",
+   "Treadmill Running",
+   "Walking / Casual"
+  ],
+  "outdoor": [
+   "Day Hiking",
+   "Backpacking",
+   "Mountaineering / Alpine",
+   "Rock Climbing",
+   "Water Sports / Kayaking",
+   "Hunting / Fishing",
+   "Cycling / Mountain Biking",
+   "Downhill Skiing",
+   "Cross-Country Skiing",
+   "Snowboarding",
+   "Snowshoeing",
+   "Travel / Light Hiking",
+   "Trail Running",
+   "Ultramarathon"
+  ],
+  "court": [
+   "Basketball",
+   "Tennis",
+   "Pickleball",
+   "Volleyball",
+   "Squash / Racquetball",
+   "Badminton"
+  ],
+  "team": [
+   "Soccer",
+   "Football (Cleats)",
+   "Baseball / Softball",
+   "Lacrosse",
+   "Rugby",
+   "Ultimate Frisbee",
+   "Field Hockey"
+  ],
+  "work": [
+   "Work / Standing All Day",
+   "Cowboy / Western"
+  ]
+ }
+}
