@@ -162,3 +162,31 @@ CREATE POLICY "No anon access to admin_users"
   TO anon, authenticated
   USING (false)
   WITH CHECK (false);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 6. Search cache — shared SerpAPI results (recommender.py), so the same model
+--    search from different users / after a Render restart costs zero credits.
+--    Server-only: written and read with the service-role key. Freshness (TTL) is
+--    enforced by the reader (FITFXR_CACHE_TTL_SHOPPING_H / _SWEEP_H); stale rows are
+--    overwritten on the next miss. Optional cleanup:
+--      DELETE FROM search_cache WHERE fetched_at < NOW() - INTERVAL '7 days';
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE search_cache (
+    kind        TEXT NOT NULL CHECK (kind IN ('shopping', 'sweep')),
+    query       TEXT NOT NULL,            -- normalised: lowercase, single spaces
+    params_hash TEXT NOT NULL,            -- sha256 of the non-query search params (pages, domains, locale)
+    results     JSONB NOT NULL DEFAULT '[]',
+    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (kind, query, params_hash)
+);
+
+CREATE INDEX idx_search_cache_fetched ON search_cache(fetched_at);
+
+ALTER TABLE search_cache ENABLE ROW LEVEL SECURITY;
+
+-- No anon/authenticated access at all; the service role bypasses RLS.
+CREATE POLICY "No client access to search_cache"
+  ON search_cache FOR ALL
+  TO anon, authenticated
+  USING (false)
+  WITH CHECK (false);

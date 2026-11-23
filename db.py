@@ -27,6 +27,23 @@ def get_service_client() -> Client:
     return create_client(url, key)
 
 
+_cache_client = None
+
+
+def get_cache_client() -> Client:
+    """Service-role client for the search_cache table: built once per process, short timeout
+    so a slow database can't hold up a product search (the cache fails open)."""
+    global _cache_client
+    if _cache_client is None:
+        from supabase import ClientOptions
+        url = _get_secret("SUPABASE_URL")
+        key = _get_secret("SUPABASE_SERVICE_KEY")
+        if not url or not key:
+            raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_KEY not set")
+        _cache_client = create_client(url, key, options=ClientOptions(postgrest_client_timeout=4))
+    return _cache_client
+
+
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 # Retry transient network failures, and turn Supabase/httpx errors into messages a
 # user can act on. The raw error is logged (Render logs), never shown.

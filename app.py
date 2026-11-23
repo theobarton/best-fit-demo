@@ -139,6 +139,35 @@ st.markdown("""
         border-color: #E3E6F0 !important;
     }
     hr { margin: 0.6rem 0 !important; }
+
+    /* ── Good / Better / Best tier cards (engine v5) ── */
+    .fit-chips { margin: 2px 0 10px; line-height: 2.1; }
+    .fit-chips .lbl { font-size: 13px; font-weight: 700; color: #5A6385; margin-right: 6px; }
+    .chip { display: inline-block; background: #E9ECF7; color: #1B2F6E; border-radius: 999px;
+            padding: 2px 11px; margin: 0 5px 4px 0; font-size: 13px; font-weight: 600; }
+    .tier-summary { color: #3B4466; font-size: 15px; margin: 0 0 12px; }
+    .tier-card { background: #fff; border: 1px solid #E3E6F0; border-radius: 14px; padding: 16px 16px 12px;
+                 min-height: 330px; position: relative; box-shadow: 0 1px 3px rgba(27,47,110,0.06); }
+    .tier-card.rec { border: 2px solid #E8A020; box-shadow: 0 6px 20px rgba(232,160,32,0.18); }
+    .tier-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    .tier-name { font-weight: 800; letter-spacing: .08em; font-size: 13px; color: #1B2F6E; }
+    .tier-blurb { font-size: 12px; color: #5A6385; }
+    .rec-badge { display: inline-block; background: #E8A020; color: #fff; font-size: 11px; font-weight: 800;
+                 border-radius: 6px; padding: 2px 8px; margin-bottom: 8px; letter-spacing: .03em; }
+    .tier-title { font-size: 20px; font-weight: 800; color: #14213D; line-height: 1.2; margin-bottom: 2px; }
+    .tier-price { font-size: 22px; font-weight: 800; color: #E8A020; }
+    .tier-price .src { font-size: 12px; font-weight: 600; color: #8890AA; margin-left: 4px; }
+    .fit-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 6px; }
+    .fit-bar { flex: 1; height: 7px; background: #EDEFF6; border-radius: 4px; overflow: hidden; }
+    .fit-bar > div { height: 100%; background: linear-gradient(90deg, #2a4494, #1B2F6E); border-radius: 4px; }
+    .fit-num { font-size: 13px; font-weight: 800; color: #1B2F6E; white-space: nowrap; }
+    .tier-why { font-size: 14px; color: #3B4466; margin: 4px 0 8px; font-style: italic; }
+    .checks { list-style: none; padding: 0; margin: 0; }
+    .checks li { font-size: 13.5px !important; margin: 2px 0; font-weight: 500; }
+    .checks li.ok { color: #1E7B4F; }
+    .checks li.no { color: #B4442F; }
+    .addon-card { background: #fff; border: 1px solid #E3E6F0; border-radius: 12px; padding: 12px 14px; min-height: 120px; }
+    .addon-kind { font-size: 11px; font-weight: 800; letter-spacing: .08em; color: #5A6385; text-transform: uppercase; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -768,6 +797,62 @@ def render_product_tiers(products, act, cat_key):
             st.rerun()
 
 
+def render_tier_cards(cat, act):
+    """Engine v5: three different models — Good / Better / Best — with fit checks per model."""
+    from html import escape
+    chips = cat.get("profile_chips") or []
+    if chips:
+        st.markdown("<div class='fit-chips'><span class='lbl'>MATCHED TO YOU:</span>"
+                    + "".join(f"<span class='chip'>{escape(c)}</span>" for c in chips) + "</div>",
+                    unsafe_allow_html=True)
+    if cat.get("summary"):
+        st.markdown(f"<div class='tier-summary'>{escape(cat['summary'])}</div>", unsafe_allow_html=True)
+    if cat.get("note"):
+        st.info(cat["note"])
+    products = cat.get("products", [])
+    cols = st.columns(len(products))
+    for col, p in zip(cols, products):
+        checks = "".join(
+            f"<li class='{'ok' if ok else 'no'}'>{'✓' if ok else '✗'} {escape(text)}</li>" for text, ok in p.get("checks", []))
+        src = "live price" if p.get("live") else "typical price"
+        with col:
+            st.markdown(f"""
+<div class="tier-card {'rec' if p.get('recommended') else ''}">
+  <div class="tier-head"><span class="tier-name">{escape(p['tier_label'].upper())}</span>
+    <span class="tier-blurb">{escape(p.get('tier_blurb', ''))}</span></div>
+  {"<div class='rec-badge'>★ RECOMMENDED FOR YOU</div>" if p.get('recommended') else ""}
+  <div class="tier-title">{escape(p['title'])}</div>
+  <div class="tier-price">{escape(str(p.get('price', '')))}<span class="src">{src}</span></div>
+  <div class="fit-row"><div class="fit-bar"><div style="width:{p['fit_score']}%"></div></div>
+    <span class="fit-num">{p['fit_score']} fit</span></div>
+  <div class="tier-why">{escape(p.get('why', ''))}</div>
+  <ul class="checks">{checks}</ul>
+</div>""", unsafe_allow_html=True)
+            if p.get("link"):
+                st.link_button(f"Shop {p['brand']} →", p["link"], use_container_width=True)
+    with st.expander("How FITFXR picked these three"):
+        st.markdown(
+            f"We scored **{cat.get('considered', 0)}** {act.lower()} models against your body, foot and "
+            f"activity answers; **{cat.get('matched', 0)}** met your must-haves. **Good**, **Better** and "
+            "**Best** are the strongest fits in the low, middle and top of the price range: three different "
+            "shoes, each a step up in price, so there's a right answer at every budget. "
+            "✓ / ✗ show exactly which of your needs each one meets.")
+
+
+def render_addons(cat):
+    from html import escape
+    cols = st.columns(len(cat.get("products", [])) or 1)
+    for col, p in zip(cols, cat.get("products", [])):
+        with col:
+            st.markdown(f"""
+<div class="addon-card"><div class="addon-kind">{escape(p.get('tier_label', ''))}</div>
+  <div style="font-weight:800;color:#14213D;font-size:16px">{escape(p['title'])}
+    <span style="color:#E8A020;margin-left:6px">{escape(str(p.get('price', '')))}</span></div>
+  <div class="tier-why" style="margin-bottom:0">{escape(p.get('why', ''))}</div></div>""", unsafe_allow_html=True)
+            if p.get("link"):
+                st.link_button("Shop →", p["link"], use_container_width=True)
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 for key, default in [
     ('step', 0), ('logged_in', False), ('username', 'Guest'), ('ai_results', None)
@@ -784,6 +869,43 @@ if 'user_data' not in st.session_state:
         'priorities': [],
         'waterproof': None,
     }
+
+
+# ── Demo presets: ?demo=runner jumps straight to results for a ready-made profile ──
+# For live demos / the leave-behind QR code — no survey typing in front of a buyer.
+DEMO_PROFILES = {
+    "runner": {"user": {"age": "35-44", "sex": "Woman", "weight": "140–160 lbs (63–72 kg)",
+                        "height": "5'6\" – 5'9\" (168–175 cm)", "shoe_size": "US 8  |  EU 41",
+                        "width": "Wide (2E)", "arch": "Flat / Low Arch", "injuries": ["Plantar Fasciitis"],
+                        "waterproof": "Doesn't matter", "priorities": ["Comfort", "Price / Value"]},
+               "answers": {"Road Running": {"goal": "Long distance (10K–Marathon)", "cushion": "Max cushion (Hoka-style)"}}},
+    "nurse": {"user": {"age": "25-34", "sex": "Woman", "weight": "160–180 lbs (72–81 kg)",
+                       "height": "5'3\" – 5'6\" (160–168 cm)", "shoe_size": "US 9  |  EU 42",
+                       "width": "Standard / Medium (D/B)", "arch": "Neutral", "injuries": ["Lower Back Pain"],
+                       "waterproof": "Nice to have", "priorities": ["Comfort", "Durability"]},
+              "answers": {"Work / Standing All Day": {"environment": "Hospital / healthcare",
+                                                      "safety": ["Slip-resistant sole"]}}},
+    "hiker": {"user": {"age": "45-54", "sex": "Man", "weight": "200–225 lbs (90–102 kg)",
+                       "height": "5'9\" – 6'0\" (175–183 cm)", "shoe_size": "US 11  |  EU 44",
+                       "width": "Wide (2E)", "arch": "High Arch", "injuries": ["Ankle Instability / Chronic Sprains"],
+                       "waterproof": "Required for most activities", "priorities": ["Support / Stability"]},
+              "answers": {"Day Hiking": {"cut": "Mid cut (ankle support)", "waterproof": "Required (Gore-Tex)"}}},
+    "athlete": {"user": {"age": "18-24", "sex": "Man", "weight": "160–180 lbs (72–81 kg)",
+                         "height": "5'9\" – 6'0\" (175–183 cm)", "shoe_size": "US 10  |  EU 43",
+                         "width": "Standard / Medium (D/B)", "arch": "Neutral", "injuries": [],
+                         "waterproof": "Doesn't matter", "priorities": ["Lightweight"]},
+                "answers": {"Soccer": {"surface": "Artificial turf — short (AG)", "position": "Midfielder"},
+                            "Basketball": {}}},
+}
+_demo = st.query_params.get("demo", "")
+if _demo in DEMO_PROFILES and st.session_state.get("_demo_loaded") != _demo:
+    _prof = DEMO_PROFILES[_demo]
+    st.session_state.user_data = {**_prof["user"], "selected_activities": list(_prof["answers"])}
+    for _act, _ans in _prof["answers"].items():
+        for _k, _v in _ans.items():
+            st.session_state[f"{_act}__{_k}"] = _v
+    st.session_state.step, st.session_state.ai_results = 5, None
+    st.session_state._demo_loaded = _demo
 
 
 def next_step(): st.session_state.step += 1
@@ -1239,7 +1361,9 @@ elif st.session_state.step == 5:
             if not st.session_state.get(f"{act}__occasional", False)
         }
 
-        with st.spinner("Be patient — scanning stores and checking every option against your fit..."):
+        _spin = ("Matching your fit across every price point..." if st.session_state.engine == "v5"
+                 else "Be patient — scanning stores and checking every option against your fit...")
+        with st.spinner(_spin):
             try:
                 results = recommend(st.session_state.engine, u, activity_answers, api_key, serpapi_key)
             except Exception as e:
@@ -1252,7 +1376,10 @@ elif st.session_state.step == 5:
         try:
             from db import save_session
             results_to_save = {
-                act: {**res, "answers": collect_activity_answers(act)}
+                act: {**res, "answers": collect_activity_answers(act),
+                      # save_session records the products actually shown (footwear tiers first)
+                      "products": [p for c in res.get("categories", {}).values() for p in c.get("products", [])],
+                      "query": " | ".join(c.get("query", "") for c in res.get("categories", {}).values())}
                 for act, res in results.items()
             }
             save_session(
@@ -1272,45 +1399,13 @@ elif st.session_state.step == 5:
                 pass
 
     # ── Render results ────────────────────────────────────────────────────────
-    st.balloons()
+    if not st.session_state.get("_demo_loaded"):
+        st.balloons()  # not in demo-link mode: they'd float over the cards mid-pitch
 
     _uname = st.session_state.username
     _dname = _uname.split("@")[0] if "@" in _uname else _uname
     greeting = f"Your Gear, {_dname}" if st.session_state.logged_in else "Your Gear Matches"
     st.subheader(greeting)
-
-    if st.session_state.logged_in:
-        st.success("✅ Results saved to your profile. Come back any time.")
-    else:
-        st.warning("💡 Create a free account to save these results and build your personalized feed.")
-
-    with st.expander("📢 Know someone who needs better gear? Share FITFXR"):
-        st.write("Send them to FITFXR — you'll both unlock early access perks.")
-        st.code("https://fitfxr.com", language=None)
-        st.caption("Referrals help us grow and unlock exclusive partner deals for our community.")
-
-    col_ns, _ = st.columns([1, 3])
-    with col_ns:
-        if st.button("🔁 Start New Search", key="new_search_top"):
-            for k in list(st.session_state.keys()):
-                if k.startswith("act_") or "__" in k or k.startswith("offset_") or k.startswith("more_"):
-                    try:
-                        del st.session_state[k]
-                    except Exception:
-                        pass
-            st.session_state.ai_results = None
-            st.session_state.user_data = {
-                'age': None, 'sex': None, 'weight': None, 'height': None,
-                'shoe_size': None, 'width': None, 'arch': None,
-                'injuries': [],
-                'selected_activities': [],
-                'priorities': [],
-                'waterproof': None,
-            }
-            st.session_state.step = 1
-            st.rerun()
-
-    st.divider()
 
     activity_results = st.session_state.ai_results
     if not activity_results:
@@ -1336,6 +1431,14 @@ elif st.session_state.step == 5:
             else:
                 for cat_key, cat_data in categories.items():
                     st.subheader(cat_data["label"])
+                    if cat_data.get("tiers"):
+                        render_tier_cards(cat_data, selected_act)
+                        st.divider()
+                        continue
+                    if cat_data.get("addons"):
+                        render_addons(cat_data)
+                        st.divider()
+                        continue
                     st.caption(f"Searched: *{cat_data['query']}*")
                     if not cat_data.get("products") and cat_data.get("search_down"):
                         st.warning(cat_data["note"])
@@ -1344,6 +1447,16 @@ elif st.session_state.step == 5:
                     else:
                         render_product_tiers(cat_data.get("products", []), selected_act, cat_key)
                     st.divider()
+
+    if st.session_state.logged_in:
+        st.success("✅ Results saved to your profile. Come back any time.")
+    else:
+        st.warning("💡 Create a free account to save these results and build your personalized feed.")
+
+    with st.expander("📢 Know someone who needs better gear? Share FITFXR"):
+        st.write("Send them to FITFXR — you'll both unlock early access perks.")
+        st.code("https://fitfxr.com", language=None)
+        st.caption("Referrals help us grow and unlock exclusive partner deals for our community.")
 
     st.divider()
     col_a, col_b = st.columns(2)
@@ -1361,6 +1474,8 @@ elif st.session_state.step == 5:
                     except Exception:
                         pass
             st.session_state.ai_results = None
+            st.session_state.pop("_demo_loaded", None)
+            st.query_params.clear()  # drop ?demo= so the preset does not reload
             st.session_state.user_data = {
                 'age': None, 'sex': None, 'weight': None, 'height': None,
                 'shoe_size': None, 'width': None, 'arch': None,

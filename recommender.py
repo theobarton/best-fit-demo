@@ -21,12 +21,15 @@ Every engine returns the shape app.py renders:
 Products may carry "fit_score" (0–100) and "why"; render_product_tiers uses them when present.
 """
 
+import contextvars
+import hashlib
 import json
 import os
 import re
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from functools import lru_cache
 from urllib.parse import urlparse
@@ -41,7 +44,8 @@ ENGINES = {
     "v1": "v1 · Rerank (GPT scores real listings)",
     "v2": "v2 · Spec Match (requirements → models → verified listings)",
     "v3": "v3 · Catalog (curated specs + live prices)",
-    "v4": "v4 · Spec Match + Verify (recommended)",
+    "v4": "v4 · Spec Match + Verify (live search + LLM judge)",
+    "v5": "v5 · Tiered Good/Better/Best (instant, recommended)",
 }
 
 CATEGORY_LABELS = {
@@ -142,6 +146,8 @@ def build_fit_profile(u, activity, answers):
         "priorities": list(u.get("priorities") or []),
         "injuries": sorted(injuries),
         "answers": answers,
+        "competitive": False,
+        "tag_rules": [],
     }
 
     if injuries & {"Overpronation / Collapsed Arches", "Flat Feet"} or arch == "Flat / Low Arch":
@@ -181,9 +187,92 @@ def build_fit_profile(u, activity, answers):
             p["goal"] = v
             if "Racing" in v:
                 p["wants_plate"] = True
-        elif "current" in l and "shoe" in l:
+        elif "current" in l and any(w in l for w in ("shoe", "boot", "cleat", "skate")):
             p["current_shoe"] = v
+        elif l == "waterproofing":
+            if v.startswith("Required"):
+                p["waterproof"] = "required"
+            elif v.startswith("Preferred") and p["waterproof"] == "any":
+                p["waterproof"] = "preferred"
+        if any(w in v for w in ("Competitive", "Elite", "Collegiate", "Professional", "Racing")):
+            p["competitive"] = True
+    p["tag_rules"] = answer_tag_rules(answers)
     return p
+
+
+# Survey answers that map to catalog tags (catalog.json "tags"). (match, tags any-of, level, phrase).
+# match: substring of the answer, or "=exact". "must" rules exclude models without the tag; "should"
+# rules only move the score. A rule is ignored when no model for the activity carries any of its tags.
+_ANSWER_TAGS = [
+    ("(FG)", ["FG"], "must", "firm-ground (FG) version"),
+    ("(AG)", ["AG"], "must", "artificial-grass (AG) version"),
+    ("(TF)", ["TF"], "must", "turf (TF) version"),
+    ("(IC)", ["IC"], "must", "indoor (IC) version"),
+    ("Metal cleats", ["metal"], "must", "metal-cleat version"),
+    ("Molded rubber cleats", ["molded"], "must", "molded-cleat version"),
+    ("Turf shoes", ["turf"], "must", "turf version"),
+    ("Spiked cross country shoe", ["spiked"], "must", "XC spikes"),
+    ("Spikeless / trail shoe", ["spikeless"], "should", "spikeless"),
+    ("Spiked / cleated", ["spiked"], "must", "spiked"),
+    ("Spikeless (versatile", ["spikeless"], "must", "spikeless"),
+    ("SPD (", ["2-bolt"], "must", "SPD (2-bolt) cleat compatible"),
+    ("SPD-SL", ["3-bolt"], "must", "3-bolt (SPD-SL / Look) compatible"),
+    ("Look Keo", ["3-bolt"], "must", "3-bolt (Look Keo) compatible"),
+    ("Look Delta", ["3-bolt"], "must", "Look Delta (Peloton) compatible"),
+    ("Flat pedals", ["flat-pedal"], "must", "flat-pedal grip"),
+    ("Neutral (comfortable", ["flat-downturn"], "should", "flat, all-day profile"),
+    ("Moderate downturn", ["moderate-downturn"], "should", "moderate downturn"),
+    ("Aggressive downturn", ["aggressive-downturn"], "should", "aggressive downturn"),
+    ("Recreational / public", ["rec"], "must", "recreational skate"),
+    ("Figure skating", ["figure"], "must", "figure skate"),
+    ("Ice hockey", ["hockey"], "must", "hockey skate"),
+    ("Soft (65", ["soft-flex"], "should", "soft flex"),
+    ("Medium (85", ["med-flex"], "should", "medium flex"),
+    ("Stiff (105", ["stiff-flex"], "should", "stiff flex"),
+    ("Race stiff", ["race-flex"], "should", "race-stiff flex"),
+    ("Soft — park", ["soft-flex"], "should", "soft flex"),
+    ("Medium — all-mountain", ["med-flex"], "should", "medium flex"),
+    ("Stiff — freeride", ["stiff-flex"], "should", "stiff flex"),
+    ("=Classic", ["classic"], "must", "classic-technique boot"),
+    ("=Skate skiing", ["skate"], "must", "skate-technique boot"),
+    ("C1 (strap-on)", ["C1", "C2", "C3"], "must", "crampon compatible"),
+    ("C2 (semi-rigid)", ["C2", "C3"], "must", "semi-rigid (C2) crampon compatible"),
+    ("C3 (full rigid)", ["C3"], "must", "rigid (C3) crampon compatible"),
+    ("Hospital / healthcare", ["safety-toe"], "avoid", "light shoe (no safety boot)"),
+    ("Office / light duty", ["safety-toe"], "avoid", "light shoe (no safety boot)"),
+    ("Restaurant / kitchen", ["safety-toe"], "avoid", "light shoe (no safety boot)"),
+    ("Retail / sales floor", ["safety-toe"], "avoid", "light shoe (no safety boot)"),
+    ("Restaurant / kitchen", ["slip-resistant"], "must", "slip-resistant sole"),
+    ("Construction / industrial", ["safety-toe"], "must", "safety toe"),
+    ("Warehouse", ["safety-toe"], "should", "safety toe"),
+    ("Slip-resistant sole", ["slip-resistant"], "must", "slip-resistant sole"),
+    ("Steel toe / composite toe", ["safety-toe"], "must", "safety toe"),
+    ("Electrical hazard", ["EH"], "must", "EH-rated"),
+    ("Yes — rocky terrain", ["rock-plate"], "should", "rock plate"),
+    ("Raised heel", ["lifter"], "should", "raised lifting heel"),
+    ("Light insulation", ["insulated"], "should", "insulated"),
+    ("Moderate insulation", ["insulated"], "should", "insulated"),
+    ("Expedition warmth", ["insulated"], "must", "insulated"),
+    ("Low cut", ["low"], "should", "low cut"),
+    ("Low-top", ["low"], "should", "low-top"),
+    ("Mid cut", ["mid", "high"], "should", "mid-cut ankle support"),
+    ("Mid-top", ["mid", "high"], "should", "mid-top"),
+    ("High cut", ["high"], "should", "high-cut ankle support"),
+    ("High-top", ["high"], "should", "high-top ankle support"),
+]
+
+
+def answer_tag_rules(answers):
+    rules, seen = [], set()
+    for val in answers.values():
+        for v in (val if isinstance(val, (list, tuple)) else [val]):
+            v = str(v)
+            for match, tags, level, desc in _ANSWER_TAGS:
+                hit = v == match[1:] if match.startswith("=") else match in v
+                if hit and (desc, level) not in seen:
+                    seen.add((desc, level))
+                    rules.append({"tags": tags, "level": level, "desc": desc})
+    return rules
 
 
 def must_haves(p):
@@ -404,6 +493,7 @@ _search_errors = []
 
 
 def _serp(params):
+    _count("serpapi_calls")
     client = GoogleSearch(params)
     client.timeout = SERP_TIMEOUT_S
     d = client.get_dict()
@@ -420,14 +510,116 @@ def _serp(params):
     return d
 
 
+# ── Shared search cache (Supabase search_cache table, see schema.sql) ──────────
+# Layer 1 is the in-process lru_cache on _search_cached / _sweep_cached: free, but lost on every
+# Render restart and private to one process. Layer 2 is this table, shared by every user and
+# restart. Only complete, successful SerpAPI responses are written — SearchUnavailable and partial
+# pages never are. The cache fails open: any Supabase problem just means a normal SerpAPI call.
+CACHE_TTL_S = {
+    "shopping": float(os.getenv("FITFXR_CACHE_TTL_SHOPPING_H", "24")) * 3600,
+    "sweep":    float(os.getenv("FITFXR_CACHE_TTL_SWEEP_H", "72")) * 3600,
+}
+SHARED_CACHE = os.getenv("FITFXR_SHARED_CACHE", "1") != "0"
+_CACHE_VERSION = 1           # bump to invalidate every row after a change to what's stored
+_CACHE_BACKOFF_S = 60        # after a Supabase error, skip the shared cache for this long
+_cache_state = {"down_until": 0.0, "off": None}
+
+
+def normalize_query(q):
+    """Same search from different users -> same cache key ('Brooks  Ghost 16' == 'brooks ghost 16')."""
+    return " ".join((q or "").lower().split())
+
+
+def _params_hash(params):
+    return hashlib.sha256(json.dumps({**params, "v": _CACHE_VERSION}, sort_keys=True).encode()).hexdigest()[:32]
+
+
+def _cache_table():
+    import db  # lazy: recommender also runs from scripts/ without Supabase configured
+    return db.get_cache_client().table("search_cache")
+
+
+def _cache_usable():
+    return SHARED_CACHE and not _cache_state["off"] and time.monotonic() >= _cache_state["down_until"]
+
+
+def _cache_failed(op, e):
+    if isinstance(e, RuntimeError) and "not set" in str(e):
+        _cache_state["off"] = str(e)  # not configured (local script) — stop trying, quietly
+        _log(f"shared search cache off: {e}")
+        return
+    if time.monotonic() >= _cache_state["down_until"]:
+        _log(f"shared search cache {op} failed, bypassing it for {_CACHE_BACKOFF_S}s: {e}")
+    _cache_state["down_until"] = time.monotonic() + _CACHE_BACKOFF_S
+
+
+def cache_get(kind, query, params):
+    """Fresh cached results (a list) for this search, or None on a miss / cache unavailable."""
+    if not _cache_usable():
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=CACHE_TTL_S[kind])
+    try:
+        rows = (_cache_table().select("results")
+                .eq("kind", kind).eq("query", query).eq("params_hash", _params_hash(params))
+                .gte("fetched_at", cutoff.isoformat()).limit(1).execute().data)
+    except Exception as e:
+        _cache_failed("read", e)
+        return None
+    if not rows:
+        return None
+    _count("shared_hits")
+    return rows[0]["results"]
+
+
+def cache_put(kind, query, params, results):
+    if not _cache_usable():
+        return
+    try:
+        _cache_table().upsert({
+            "kind": kind, "query": query, "params_hash": _params_hash(params),
+            "results": list(results), "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="kind,query,params_hash").execute()
+    except Exception as e:
+        _cache_failed("write", e)
+
+
+# Per results page (one recommend() call): how each search was answered. A contextvar, so
+# concurrent users don't mix counts; run_with_deadline copies it into its worker threads.
+_stats_var = contextvars.ContextVar("fitfxr_search_stats", default=None)
+_stats_lock = threading.Lock()
+
+
+def _count(field, n=1):
+    stats = _stats_var.get()
+    if stats is not None:
+        with _stats_lock:
+            stats[field] = stats.get(field, 0) + n
+
+
+def search_stats_line(stats):
+    lookups = stats.get("lookups", 0)
+    shared = stats.get("shared_hits", 0)
+    fetched = stats.get("fetched", 0)
+    return (f"searches this page: {lookups} — {lookups - fetched} memory cache, {shared} shared cache, "
+            f"{fetched - shared} SerpAPI ({stats.get('serpapi_calls', 0)} SerpAPI requests)")
+
+
 SHOPPING_RESULTS = int(os.getenv("FITFXR_SHOPPING_RESULTS", "150"))
 _SHOPPING_PAGE = 100  # requested page size; Google currently serves ~40/page, so 150 ≈ 4 credits
 
 
+def _shopping_params():
+    return {"engine": "google_shopping", "results": SHOPPING_RESULTS, "num": _SHOPPING_PAGE, "gl": "us", "hl": "en"}
+
+
 @lru_cache(maxsize=512)
 def _search_cached(query, serpapi_key):
-    """Page through Google Shopping until SHOPPING_RESULTS listings (or results run out)."""
-    out, seen = [], set()
+    """Shared cache, else page through Google Shopping until SHOPPING_RESULTS listings (or results run out)."""
+    _count("fetched")
+    hit = cache_get("shopping", query, _shopping_params())
+    if hit is not None:
+        return tuple(hit)
+    out, seen, complete = [], set(), True
     while len(out) < SHOPPING_RESULTS:
         try:
             page = _serp({
@@ -437,19 +629,25 @@ def _search_cached(query, serpapi_key):
         except Exception:
             if not out:
                 raise  # nothing to show — let the caller decide (and don't cache the failure)
+            complete = False  # show what we have, but don't share a truncated result
             break
         fresh = [r for r in page if (r.get("product_id") or r.get("title")) not in seen]
         if not fresh:
             break  # results ran out (or Google repeated the page)
         seen.update(r.get("product_id") or r.get("title") for r in fresh)
         out.extend(fresh)
-    return tuple(out[:SHOPPING_RESULTS])
+    out = out[:SHOPPING_RESULTS]
+    if complete:
+        cache_put("shopping", query, _shopping_params(), out)
+    return tuple(out)
 
 
 def shopping_search(query, serpapi_key):
-    """Google Shopping via SerpAPI. Cached per process so retries/refines don't burn quota."""
+    """Google Shopping via SerpAPI, behind the in-process and shared caches."""
+    query = normalize_query(query)
     if not query:
         return []
+    _count("lookups")
     try:
         return [dict(r) for r in _search_cached(query, serpapi_key)]
     except Exception as e:
@@ -473,7 +671,9 @@ def run_with_deadline(fn, items, deadline_s, default=None):
         except Exception as e:
             _log(f"parallel call failed: {e}")
 
-    threads = [threading.Thread(target=work, args=(i, it), daemon=True) for i, it in enumerate(items)]
+    # Each thread runs in a copy of the caller's context so per-page search stats reach it.
+    threads = [threading.Thread(target=contextvars.copy_context().run, args=(work, i, it), daemon=True)
+               for i, it in enumerate(items)]
     for t in threads:
         t.start()
     end = time.monotonic() + deadline_s
@@ -548,12 +748,18 @@ def _strip_site_suffix(title, retailer):
 
 @lru_cache(maxsize=1024)
 def _sweep_cached(query, domains, serpapi_key):
-    # No parentheses around the site: list — Google silently drops the filter if they're there.
-    sites = " OR ".join(f"site:{d}" for d in domains)
-    organic = _serp({
-        "engine": "google", "q": f"{query.replace(chr(39), '')} {sites}", "api_key": serpapi_key,
-        "num": 10, "gl": "us", "hl": "en",
-    }).get("organic_results", [])
+    _count("fetched")
+    # The raw organic results are cached (not the parsed products), so filter changes apply at once.
+    params = {"engine": "google", "domains": sorted(domains), "num": 10, "gl": "us", "hl": "en"}
+    organic = cache_get("sweep", query, params)
+    if organic is None:
+        # No parentheses around the site: list — Google silently drops the filter if they're there.
+        sites = " OR ".join(f"site:{d}" for d in domains)
+        organic = _serp({
+            "engine": "google", "q": f"{query.replace(chr(39), '')} {sites}", "api_key": serpapi_key,
+            "num": 10, "gl": "us", "hl": "en",
+        }).get("organic_results", [])
+        cache_put("sweep", query, params, organic)
     out = []
     for r in organic:
         link = r.get("link", "")
@@ -579,8 +785,10 @@ def _sweep_cached(query, domains, serpapi_key):
 
 
 def retailer_sweep(query, domains, serpapi_key):
+    query = normalize_query(query)
     if not query or not domains:
         return []
+    _count("lookups")
     try:
         return [dict(r) for r in _sweep_cached(query, tuple(domains), serpapi_key)]
     except Exception as e:
@@ -1163,6 +1371,344 @@ def recommend_v3(u, activity_answers, client, serpapi_key):
     return results
 
 
+# ── v5: tiered (Good / Better / Best) ─────────────────────────────────────────
+# Three DIFFERENT models at three distinct price points, each the strongest fit for this person
+# in its price band — the budget buyer gets a real recommendation, not just the cheapest seller.
+# Catalog-only and deterministic: no LLM and no live search on the critical path, so results are
+# instant, repeatable and auditable. FITFXR_LIVE_PRICES=1 (with SerpAPI credits) adds live store
+# prices/links for the three picks; without it, picks show typical retail and a shop link.
+
+TIERS = [("good", "Good", "Smart budget pick"), ("better", "Better", "Best balance"), ("best", "Best", "Premium pick")]
+LIVE_PRICES = os.getenv("FITFXR_LIVE_PRICES", "0") == "1"
+SHOP_URL = os.getenv("FITFXR_SHOP_URL", "https://www.google.com/search?tbm=shop&q={q}")
+_MIN_STEP = 1.12  # each tier costs at least 12% more than the one below
+
+
+def load_gear():
+    with open(_CATALOG_PATH) as f:
+        return json.load(f).get("gear", [])
+
+
+def fit_display(score):
+    """score_spec's open-ended score -> a 50–99 'fit score' for display (monotonic)."""
+    return max(50, min(99, round(55 + 0.45 * score)))
+
+
+def _profile_chips(p):
+    chips = []
+    if p["stability"] == "required":
+        chips.append("Stability support")
+    elif p["stability"] == "avoid":
+        chips.append("Neutral (no motion control)")
+    if p["cushion"] != "any":
+        chips.append(f"{p['cushion'].capitalize()} cushion")
+    if p["wide"]:
+        chips.append("Extra-wide (4E)" if p["extra_wide"] else "Wide (2E)")
+    if p["wide_toebox"]:
+        chips.append("Roomy toe box")
+    if p["ankle_support"]:
+        chips.append("Ankle support")
+    if p["waterproof"] == "required":
+        chips.append("Waterproof")
+    if p["min_drop_mm"] is not None or p["max_drop_mm"] is not None:
+        chips.append(f"Drop {p['min_drop_mm'] if p['min_drop_mm'] is not None else 0}–"
+                     f"{p['max_drop_mm'] if p['max_drop_mm'] is not None else 14}mm")
+    if p["wants_plate"]:
+        chips.append("Plated / race")
+    if p["vegan"]:
+        chips.append("Vegan")
+    chips += [r["desc"][0].upper() + r["desc"][1:] for r in p["tag_rules"] if r["level"] == "must"]
+    return chips
+
+
+def _checks(spec, p, rules):
+    """What this model does for the person's must-haves: [(text, ok)]."""
+    out = []
+    stab = (spec.get("stability") or "").lower()
+    if p["stability"] == "required":
+        out.append((f"{stab.capitalize()} support for flat arches / overpronation",
+                    stab in ("stability", "motion control")))
+    elif p["stability"] == "avoid":
+        out.append(("No motion control (right for high arches)", stab != "motion control"))
+    if p["cushion"] != "any" and spec.get("cushion"):
+        ok = spec["cushion"] == p["cushion"]
+        out.append((f"{p['cushion'].capitalize()} cushion" + ("" if ok else f" (this one is {spec['cushion']})"), ok))
+    if p["wide"]:
+        out.append(("Made in wide sizes", bool(spec.get("wide_available"))))
+    if p["wide_toebox"]:
+        out.append(("Roomy toe box", bool(spec.get("wide_toebox"))))
+    if p["ankle_support"]:
+        out.append(("Ankle support", bool(spec.get("ankle_support"))))
+    if p["waterproof"] == "required":
+        out.append(("Waterproof version", bool(spec.get("waterproof_option"))))
+    tags = set(spec.get("tags") or [])
+    for r in rules:
+        if r["level"] == "must":
+            out.append((r["desc"][0].upper() + r["desc"][1:], bool(tags & set(r["tags"]))))
+    return out
+
+
+def _with_reasons(checks, reasons, limit=5):
+    """Top up the must-have checks with the scorer's positive reasons, so every card says why it fits."""
+    seen = {t.lower() for t, _ in checks}
+    out = list(checks)
+    for r in reasons:
+        if len(out) >= limit:
+            break
+        if r.startswith("closest match"):
+            continue
+        txt = r[0].upper() + r[1:]
+        if not any(txt.lower() in t or t in txt.lower() for t in seen):
+            out.append((txt, True))
+            seen.add(txt.lower())
+    return out
+
+
+def score_tiered(spec, p, rules):
+    """score_spec plus the activity-specific tag rules. (score, reasons) or (None, [why not])."""
+    score, reasons = score_spec(spec, p)
+    if score is None:
+        return None, reasons
+    tags = set(spec.get("tags") or [])
+    for r in rules:
+        has = bool(tags & set(r["tags"]))
+        if r["level"] == "avoid":
+            score -= 15 if has else 0
+            continue
+        if r["level"] == "must" and not has:
+            return None, [f"not {r['desc']}"]
+        if has:
+            score += 10 if r["level"] == "must" else 8
+            reasons.insert(0, r["desc"])
+        elif r["level"] == "should":
+            score -= 4
+    if p.get("competitive") and (spec.get("plate") or spec.get("weight") == "light"):
+        score += 4
+    return score, reasons
+
+
+def pick_tiers(scored):
+    """scored: [(spec, score)] — choose (good, better, best): three different models with each price
+    at least _MIN_STEP above the previous, maximising total fit, with a bonus for landing in the
+    low / middle / top third of the price range and for brand variety. Brute force — n is small."""
+    scored = sorted(scored, key=lambda x: (x[0]["price_usd"], -x[1]))
+    prices = sorted(sp["price_usd"] for sp, _ in scored)
+    if len(scored) < 3:
+        return [sp for sp, _ in scored]
+    lo, hi = prices[len(prices) // 3], prices[(2 * len(prices)) // 3]
+    top = max(sc for _, sc in scored)
+    # Keep the search fast and sensible: the 40 strongest fits.
+    pool = sorted(scored, key=lambda x: -x[1])[:40]
+    pool.sort(key=lambda x: x[0]["price_usd"])
+
+    def quality(sc):
+        return sc - 2 * max(0, top - sc - 15)  # steep cost for anything well below the best fit
+
+    best, best_val = None, None
+    n = len(pool)
+    for i in range(n):
+        g, gs = pool[i]
+        for j in range(i + 1, n):
+            b, bs = pool[j]
+            if b["price_usd"] < g["price_usd"] * _MIN_STEP:
+                continue
+            for k in range(j + 1, n):
+                x, xs = pool[k]
+                if x["price_usd"] < b["price_usd"] * _MIN_STEP:
+                    continue
+                val = quality(gs) + quality(bs) + quality(xs)
+                val += 10 * (g["price_usd"] <= lo) + 6 * (lo < b["price_usd"] <= hi or b["price_usd"] == lo) \
+                    + 10 * (x["price_usd"] >= hi)
+                val += 4 * (len({g["brand"], b["brand"], x["brand"]}) - 1)
+                if best_val is None or val > best_val:
+                    best, best_val = (g, b, x), val
+    if best:
+        return list(best)
+    # Prices too bunched for clean steps: best fits at three different prices, else top three.
+    out, used = [], set()
+    for sp, _ in sorted(scored, key=lambda x: -x[1]):
+        if sp["price_usd"] not in used:
+            out.append(sp)
+            used.add(sp["price_usd"])
+        if len(out) == 3:
+            break
+    if len(out) < 3:
+        out = [sp for sp, _ in sorted(scored, key=lambda x: -x[1])[:3]]
+    return sorted(out, key=lambda sp: sp["price_usd"])
+
+
+def _shop_link(q):
+    from urllib.parse import quote_plus
+    return SHOP_URL.format(q=quote_plus(q))
+
+
+def _query_for(spec, p):
+    return " ".join(filter(None, [spec["brand"], spec["model"], p["gender"],
+                                  "wide" if p["wide"] and spec.get("wide_available") else "",
+                                  "gore-tex" if p["waterproof"] == "required" and spec.get("waterproof_option") else ""]))
+
+
+def _recommended_tier(p):
+    if "Price / Value" in p["priorities"]:
+        return "good"
+    if p["competitive"] or p["wants_plate"]:
+        return "best"
+    return "better"
+
+
+def _attach_live_prices(picks, p, serpapi_key):
+    """Optional: best trusted live listing for each pick (in parallel, bounded). Fails soft."""
+    def lookup(prod):
+        hits = [x for x in shopping_search(prod["query"], serpapi_key)
+                if title_matches_model(x.get("title"), prod["brand"], prod["model"])
+                and title_ok(x.get("title"), p, check_size=False) and not is_blocked(x)
+                and parse_price(x.get("price")) is not None]
+        hits.sort(key=lambda x: (not is_trusted(x), parse_price(x.get("price"))))
+        return hits[0] if hits else None
+    for prod, hit in zip(picks, run_with_deadline(lookup, picks, 12)):
+        if hit:
+            prod.update(price=hit.get("price"), source=hit.get("source"), live=True,
+                        link=hit.get("link") or hit.get("product_link") or prod["link"],
+                        thumbnail=hit.get("thumbnail"))
+
+
+def _pick_gear(p):
+    act, inj = p["activity"], set(p["injuries"])
+    arch = "flat" if p["stability"] == "required" else "high" if p["stability"] == "avoid" else None
+
+    def rank(g):
+        if inj & set(g.get("for_injuries", [])):
+            return 0
+        if arch and arch in g.get("for_arch", []):
+            return 1
+        if act in g.get("for_activities", []):
+            return 2
+        if not (g.get("for_injuries") or g.get("for_arch") or g.get("for_activities")):
+            return 3  # general fallback
+        return 9
+    out = []
+    for kind, label in (("insole", "Insole"), ("sock", "Socks")):
+        options = sorted((g for g in load_gear() if g["kind"] == kind), key=rank)
+        if options and rank(options[0]) < 9:
+            g = options[0]
+            name = f"{g['brand']} {g['model']}"
+            out.append({"title": name, "brand": g["brand"], "model": g["model"], "tier_label": label,
+                        "price": f"${g['price_usd']}", "price_usd": g["price_usd"], "why": g["highlight"],
+                        "source": "Typical price", "link": _shop_link(name), "requested": name})
+    return out
+
+
+def _v5_activity(u, act, answers, serpapi_key):
+    p = build_fit_profile(u, act, answers)
+    candidates = [c for c in load_catalog() if act in c.get("activities", [])]
+    # Only enforce rules the catalog can answer for this activity (e.g. no cleat tags on running shoes).
+    have = {t for c in candidates for t in c.get("tags", [])}
+    rules = [r for r in p["tag_rules"] if have & set(r["tags"])]
+
+    def eligible(prof, rls):
+        out = []
+        for spec in candidates:
+            sc, reasons = score_tiered(spec, prof, rls)
+            if sc is not None:
+                if spec.get("activities", [None])[0] == act:
+                    sc += 4  # purpose-built for this activity, not a crossover pick
+                    reasons.append(f"built for {act.lower()}")
+                out.append((spec, sc, reasons))
+        return out
+
+    # If a must-have leaves fewer than three models, relax the least critical one and say so,
+    # rather than returning nothing (e.g. 'waterproof for most activities' + road running).
+    relax_steps = [
+        ("waterproof", lambda q: {**q, "waterproof": "preferred"} if q["waterproof"] == "required" else None),
+        ("vegan", lambda q: {**q, "vegan": False} if q["vegan"] else None),
+        ("wide", lambda q: {**q, "wide": False, "extra_wide": False} if q["wide"] else None),
+        ("stability support", lambda q: {**q, "stability": "any"} if q["stability"] == "required" else None),
+    ]
+    prof, rls, relaxed = p, rules, []
+    if p["waterproof"] == "required" and not any(c.get("waterproof_option") for c in candidates):
+        prof = {**p, "waterproof": "any"}  # the general survey answer doesn't apply (court shoes, cleats...)
+    scored = eligible(prof, rls)
+    if len(scored) < 3:
+        # Prefer relaxing ONE thing (the first, least critical, that is enough); else relax cumulatively.
+        single = [(phrase, nxt) for phrase, step in relax_steps if (nxt := step(prof)) is not None]
+        for phrase, nxt in single:
+            trial = eligible(nxt, rls)
+            if len(trial) >= 3:
+                prof, scored, relaxed = nxt, trial, [phrase]
+                break
+        else:
+            for phrase, step in relax_steps:
+                if len(scored) >= 3:
+                    break
+                nxt = step(prof)
+                if nxt is not None:
+                    prof = nxt
+                    relaxed.append(phrase)
+                    scored = eligible(prof, rls)
+    if len(scored) < 3 and any(r["level"] == "must" for r in rls):
+        relaxed += [r["desc"] for r in rls if r["level"] == "must"]
+        rls = [r for r in rls if r["level"] != "must"]
+        scored = eligible(prof, rls)
+    closest = bool(relaxed)
+    by_id = {id(sp): (sc, rs) for sp, sc, rs in scored}
+    picks = pick_tiers([(sp, sc) for sp, sc, _ in scored])
+
+    rec = _recommended_tier(p)
+    products = []
+    for (key, label, blurb), spec in zip(TIERS[-len(picks):] if len(picks) < 3 else TIERS, picks):
+        sc, reasons = by_id[id(spec)]
+        name = f"{spec['brand']} {spec['model']}"
+        q = _query_for(spec, p)
+        checks = _with_reasons(_checks(spec, {**p, "waterproof": prof["waterproof"] if p["waterproof"] == "required"
+                                              and prof["waterproof"] == "any" else p["waterproof"]}, rules), reasons)
+        fit = fit_display(sc)
+        fails = sum(1 for _, ok in checks if not ok)
+        if fails:
+            fit = min(fit, 94 - 5 * (fails - 1))  # a visible ✗ can't sit next to a near-perfect score
+        products.append({
+            "title": name, "brand": spec["brand"], "model": spec["model"],
+            "tier": key, "tier_label": label, "tier_blurb": blurb, "recommended": key == rec,
+            "price": f"${spec['price_usd']}", "price_usd": spec["price_usd"], "source": "Typical price",
+            "fit_score": fit, "raw_score": sc,
+            "why": spec.get("highlight", ""), "reasons": reasons[:3],
+            "checks": checks, "query": q, "link": _shop_link(q), "verified": True,
+        })
+    if products and not any(x["recommended"] for x in products):
+        products[len(products) // 2]["recommended"] = True
+    if LIVE_PRICES and serpapi_key and products:
+        _attach_live_prices(products, p, serpapi_key)
+
+    cat = _category("footwear", " · ".join(x["title"] for x in products), products)
+    cat.update(tiers=True, profile_chips=_profile_chips(p), considered=len(candidates), matched=len(scored))
+    if len(products) == 3:
+        g, x = products[0], products[2]
+        gap = x["fit_score"] - g["fit_score"]
+        cat["summary"] = (f"Checked {len(candidates)} {act.lower()} models against your profile. "
+                          f"The Good pick saves ${x['price_usd'] - g['price_usd']} vs Best"
+                          + (" with almost the same fit." if gap <= 4 else f" for {gap} fewer fit points."))
+    if relaxed:
+        cat["note"] = (f"Few {act.lower()} models come with {' or '.join(relaxed)}, so these are the "
+                       f"best fits without it — check the ✗ items before you buy.")
+        cat["relaxed"] = relaxed
+    cats = {"footwear": cat}
+    gear = _pick_gear(p)
+    if gear:
+        cats["gear_1"] = {**_category("gear_1", " · ".join(x["title"] for x in gear), gear),
+                          "label": "🧦 Complete the fit", "addons": True}
+    return cats
+
+
+def recommend_v5(u, activity_answers, client, serpapi_key):
+    results = {}
+    for act, answers in activity_answers.items():
+        try:
+            results[act] = {"engine": "v5", "categories": _v5_activity(u, act, answers, serpapi_key)}
+        except Exception as e:
+            _log(f"v5 failed for {act}: {e}")
+            results[act] = {"engine": "v5", "categories": {}, "error": str(e)}
+    return results
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def recommend_v4(u, activity_answers, client, serpapi_key):
@@ -1177,8 +1723,9 @@ def recommend_v4(u, activity_answers, client, serpapi_key):
     return results
 
 
-DEFAULT_ENGINE = "v4"
-_DISPATCH = {"v0": recommend_v0, "v1": recommend_v1, "v2": recommend_v2, "v3": recommend_v3, "v4": recommend_v4}
+DEFAULT_ENGINE = "v5"
+_DISPATCH = {"v0": recommend_v0, "v1": recommend_v1, "v2": recommend_v2, "v3": recommend_v3, "v4": recommend_v4,
+             "v5": recommend_v5}
 
 
 SEARCH_DOWN_NOTE = ("Live product search is temporarily unavailable, so we couldn't check stores just now. "
@@ -1187,9 +1734,17 @@ SEARCH_DOWN_NOTE = ("Live product search is temporarily unavailable, so we could
 
 def recommend(engine, user_data, activity_answers, openai_key, serpapi_key):
     """activity_answers: {primary_activity: {question_label: answer}}"""
-    client = OpenAI(api_key=openai_key)
+    # v5 needs no LLM; don't require an OpenAI key for it.
+    client = OpenAI(api_key=openai_key) if engine != "v5" and openai_key else None
     _search_errors.clear()
-    results = _DISPATCH.get(engine, _DISPATCH[DEFAULT_ENGINE])(user_data, activity_answers, client, serpapi_key)
+    stats = {}
+    token = _stats_var.set(stats)
+    try:
+        results = _DISPATCH.get(engine, _DISPATCH[DEFAULT_ENGINE])(user_data, activity_answers, client, serpapi_key)
+    finally:
+        _stats_var.reset(token)
+        _log(f"{engine} · {len(activity_answers)} activit{'y' if len(activity_answers) == 1 else 'ies'} · "
+             + search_stats_line(stats))
     if _search_errors:
         # Empty categories were caused by search failures, not by the person's must-haves.
         for res in results.values():
