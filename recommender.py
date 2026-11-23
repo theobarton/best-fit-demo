@@ -1425,7 +1425,9 @@ def _checks(spec, p, rules):
     """What this model does for the person's must-haves: [(text, ok)]."""
     out = []
     stab = (spec.get("stability") or "").lower()
-    if p["stability"] == "required":
+    if stab in ("", "n/a"):
+        pass  # skates, climbing shoes, ski boots, cleats: arch support isn't a property of this kind of shoe
+    elif p["stability"] == "required":
         out.append((f"{stab.capitalize()} support for flat arches / overpronation",
                     stab in ("stability", "motion control")))
     elif p["stability"] == "avoid":
@@ -1448,9 +1450,43 @@ def _checks(spec, p, rules):
     return out
 
 
+# What a check / reason line is about, so "Made in wide sizes" and "comes in wide" count as one line.
+_LINE_TOPICS = [("toebox", ("toe box",)), ("width", ("wide",)), ("ankle", ("ankle",)),
+                ("waterproof", ("waterproof", "gore-tex")), ("cushion", ("cushion",)),
+                ("stability", ("stability", "motion control", "neutral", "arch")), ("drop", ("mm drop",)),
+                ("vegan", ("vegan",)), ("activity", ("built for ", "made for "))]
+
+
+def _line_topic(text):
+    t = text.lower()
+    for topic, words in _LINE_TOPICS:
+        if any(w in t for w in words):
+            return topic
+    return None
+
+
+def _spec_facts(spec, act):
+    """Plain facts about the shoe, for a card that has no must-haves to check (a no-special-needs profile)."""
+    out = [(f"Made for {act.lower()}", True)]
+    bits = []
+    if spec.get("cushion") and spec["cushion"] != "n/a":
+        bits.append(f"{spec['cushion']} cushion")
+    if isinstance(spec.get("drop_mm"), (int, float)):
+        bits.append(f"{int(spec['drop_mm'])}mm drop")
+    if spec.get("weight") == "light":
+        bits.append("lightweight")
+    if spec.get("durable"):
+        bits.append("durable build")
+    if bits:
+        out.append(((", ".join(bits))[0].upper() + ", ".join(bits)[1:], True))
+    return out
+
+
 def _with_reasons(checks, reasons, limit=5):
-    """Top up the must-have checks with the scorer's positive reasons, so every card says why it fits."""
+    """Top up the must-have checks with the scorer's positive reasons, so every card says why it fits.
+    A reason about something a check already covers (width, arch support, cushion...) is skipped."""
     seen = {t.lower() for t, _ in checks}
+    topics = {_line_topic(t) for t, _ in checks} - {None}
     out = list(checks)
     for r in reasons:
         if len(out) >= limit:
@@ -1458,9 +1494,13 @@ def _with_reasons(checks, reasons, limit=5):
         if r.startswith("closest match"):
             continue
         txt = r[0].upper() + r[1:]
-        if not any(txt.lower() in t or t in txt.lower() for t in seen):
-            out.append((txt, True))
-            seen.add(txt.lower())
+        topic = _line_topic(txt)
+        if topic in topics or any(txt.lower() in t or t in txt.lower() for t in seen):
+            continue
+        out.append((txt, True))
+        seen.add(txt.lower())
+        if topic:
+            topics.add(topic)
     return out
 
 
@@ -1532,8 +1572,8 @@ def pick_tiers(scored):
             used.add(sp["price_usd"])
         if len(out) == 3:
             break
-    if len(out) < 3:
-        out = [sp for sp, _ in sorted(scored, key=lambda x: -x[1])[:3]]
+    # Fewer than three distinct prices: show what there is (e.g. Better + Best) rather than two "tiers"
+    # at the same price.
     return sorted(out, key=lambda sp: sp["price_usd"])
 
 
@@ -1603,6 +1643,7 @@ def _v5_activity(u, act, answers, serpapi_key):
     candidates = [c for c in load_catalog() if act in c.get("activities", [])]
     # Only enforce rules the catalog can answer for this activity (e.g. no cleat tags on running shoes).
     have = {t for c in candidates for t in c.get("tags", [])}
+    cushions = {c.get("cushion") for c in candidates} | {"any"}
     rules = [r for r in p["tag_rules"] if have & set(r["tags"])]
 
     def eligible(prof, rls):
@@ -1659,8 +1700,13 @@ def _v5_activity(u, act, answers, serpapi_key):
         sc, reasons = by_id[id(spec)]
         name = f"{spec['brand']} {spec['model']}"
         q = _query_for(spec, p)
-        checks = _with_reasons(_checks(spec, {**p, "waterproof": prof["waterproof"] if p["waterproof"] == "required"
-                                              and prof["waterproof"] == "any" else p["waterproof"]}, rules), reasons)
+        check_p = {**p, "waterproof": prof["waterproof"] if p["waterproof"] == "required"
+                   and prof["waterproof"] == "any" else p["waterproof"]}
+        if p["cushion"] not in cushions:
+            check_p["cushion"] = "any"  # no model for this activity offers it (e.g. max-cushion climbing shoes)
+        checks = _with_reasons(_checks(spec, check_p, rules), reasons)
+        if len(checks) < 2:
+            checks = _with_reasons(checks, [t for t, _ in _spec_facts(spec, act)], limit=3)
         fit = fit_display(sc)
         fails = sum(1 for _, ok in checks if not ok)
         if fails:

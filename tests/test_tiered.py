@@ -105,6 +105,29 @@ class TieredEngineTest(unittest.TestCase):
         gear = R._v5_activity(FLAT_WIDE, "Road Running", {}, "")["gear_1"]["products"]
         self.assertIn("Powerstep", gear[0]["title"])
 
+    def test_check_lines_do_not_repeat_a_topic(self):
+        for u in (NEUTRAL, FLAT_WIDE):
+            for act in ACTIVITIES:
+                for x in tiers(u, act)["products"]:
+                    topics = [R._line_topic(t) for t, _ in x["checks"]]
+                    topics = [t for t in topics if t]
+                    with self.subTest(act=act, pick=x["title"]):
+                        self.assertEqual(len(topics), len(set(topics)), x["checks"])
+
+    def test_cards_never_show_na_and_always_say_why(self):
+        for u in (NEUTRAL, FLAT_WIDE):
+            for act in ACTIVITIES:
+                for x in tiers(u, act)["products"]:
+                    with self.subTest(act=act, pick=x["title"]):
+                        self.assertTrue(x["checks"])
+                        self.assertFalse(any("n/a" in t.lower() for t, _ in x["checks"]), x["checks"])
+
+    def test_no_two_tiers_at_the_same_price(self):
+        ans = {"Warmth / insulation": "Expedition warmth"}
+        picks = tiers(NEUTRAL, "Mountaineering / Alpine", ans)["products"]
+        prices = [x["price_usd"] for x in picks]
+        self.assertEqual(len(prices), len(set(prices)), prices)
+
 
 if __name__ == "__main__":
     unittest.main()
