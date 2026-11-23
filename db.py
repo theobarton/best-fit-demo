@@ -5,12 +5,22 @@ import time
 from supabase import create_client, Client
 
 
+_SECRETS_FILES = [os.path.join(".streamlit", "secrets.toml"),
+                  os.path.join(os.path.expanduser("~"), ".streamlit", "secrets.toml")]
+
+
 def _get_secret(key):
-    try:
-        import streamlit as st
-        return st.secrets[key]
-    except Exception:
-        return os.environ.get(key, "")
+    # Environment first (Render sets keys as env vars). Touching st.secrets when no secrets.toml
+    # exists makes Streamlit print a "No secrets found" banner on the page, so only try it then.
+    if os.environ.get(key):
+        return os.environ[key]
+    if any(os.path.exists(p) for p in _SECRETS_FILES):
+        try:
+            import streamlit as st
+            return st.secrets[key]
+        except Exception:
+            pass
+    return ""
 
 
 def get_client() -> Client:
